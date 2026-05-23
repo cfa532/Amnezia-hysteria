@@ -24,7 +24,7 @@ This allows the WireGuard tunnel to pass through networks that would normally bl
 
 ### Why Hysteria2 over wstunnel?
 
-The previous transport was `wstunnel` (WebSocket over TLS → TCP). Despite looking like HTTPS traffic, GFW throttles TCP connections to flagged ASNs (Alibaba Cloud Singapore) to 8–26 KB/s.
+The previous transport was `wstunnel` (WebSocket over TLS → TCP). Despite looking like HTTPS traffic, GFW throttles TCP connections to flagged ASNs (Cloud Server Singapore) to 8–26 KB/s.
 
 Hysteria2 uses **QUIC** (UDP/443), which is not subject to this throttling on the same paths. Measured results:
 
