@@ -1,13 +1,13 @@
 # AmneziaWG + Hysteria2 Anti-Censorship VPN
 
-A censorship-resistant VPN stack that bypasses GFW deep-packet inspection and TCP throttling using AmneziaWG (obfuscated WireGuard) tunnelled over Hysteria2 (QUIC/UDP).
+A VPN stack that bypasses GFW deep-packet inspection and TCP throttling using AmneziaWG (obfuscated WireGuard) tunnelled over Hysteria2 (QUIC/UDP).
 
 ## The Problem
 
-China's Great Firewall applies two layers of interference to overseas VPN traffic:
+GFW applies two layers of interference to overseas VPN traffic:
 
 1. **DPI fingerprinting** — Standard WireGuard handshakes are identified and blocked. Traffic to known VPN IPs is rate-limited or dropped.
-2. **TCP throttling** — Even when tunnelled via WebSocket/TLS (wstunnel), GFW throttles TCP connections to overseas Alibaba Cloud endpoints to ~8–26 KB/s, rendering the connection unusable for anything beyond text.
+2. **TCP throttling** — Even when tunnelled via WebSocket/TLS (wstunnel), GFW throttles TCP connections to overseas endpoints to ~8–26 KB/s, rendering the connection unusable for anything beyond text.
 
 QUIC (UDP) traffic is not subject to the same throttling on these paths. Hysteria2 exploits this by carrying the VPN tunnel over QUIC.
 
