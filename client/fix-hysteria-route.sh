@@ -1,23 +1,22 @@
 #!/bin/bash
-# macOS route fix daemon — keeps the Hysteria2 server IP routed via WiFi (en1),
-# not via the AmneziaWG utun interface (which would create a routing loop).
-#
-# macOS spuriously clones a host route for the VPN server IP onto utun when
-# AmneziaWG activates, even though the IP is excluded from AllowedIPs.
-# This script reacts instantly to route table changes via `route monitor`
-# and overrides the cloned route with a static host route via the WiFi gateway.
-#
-# Deploy as a LaunchDaemon (root) so it can run `route` commands without sudo.
-# See: uk.fireshare.hysteria-route.plist
-
-TARGET=<HYSTERIA2_SERVER_IP>   # e.g. <SERVER_1_IP>
-IFACE=en1                       # WiFi interface (direct home router, no soft router)
+TARGETS=(
+    8.222.164.32
+    43.160.238.86
+)
+IFACE=en1
 
 fix_route() {
+    local target="$1"
     local current_iface current_gateway expected_gateway
-    current_iface=$(/sbin/route get "$TARGET" 2>/dev/null | awk '/interface/{print $2}')
-    current_gateway=$(/sbin/route get "$TARGET" 2>/dev/null | awk '/gateway/{print $2}')
+
+    current_iface=$(/sbin/route get "$target" 2>/dev/null | awk '/interface/{print $2}')
+    current_gateway=$(/sbin/route get "$target" 2>/dev/null | awk '/gateway/{print $2}')
+
+    # DHCP gives the router via ipconfig; manual/static IPs need the routing table fallback
     expected_gateway=$(ipconfig getoption "$IFACE" router 2>/dev/null)
+    if [[ -z "$expected_gateway" ]]; then
+        expected_gateway=$(netstat -rn 2>/dev/null | awk '/^default/ && $NF=="'"$IFACE"'" {print $2; exit}')
+    fi
 
     if [[ -z "$expected_gateway" ]]; then
         echo "$(date) no gateway on $IFACE yet, skipping"
@@ -25,14 +24,15 @@ fix_route() {
     fi
 
     if [[ "$current_iface" != "$IFACE" || "$current_gateway" != "$expected_gateway" ]]; then
-        /sbin/route delete -host "$TARGET" 2>/dev/null
-        /sbin/route add -host "$TARGET" "$expected_gateway"
-        echo "$(date) fixed route via $expected_gateway ($IFACE)"
+        /sbin/route delete -host "$target" 2>/dev/null
+        /sbin/route delete -host "$target" 2>/dev/null
+        /sbin/route add -host "$target" "$expected_gateway"
+        echo "$(date) fixed $target → $expected_gateway ($IFACE)"
     fi
 }
 
-fix_route
+for _t in "${TARGETS[@]}"; do fix_route "$_t"; done
 
 /sbin/route monitor | while IFS= read -r _line; do
-    fix_route
+    for _t in "${TARGETS[@]}"; do fix_route "$_t"; done
 done
