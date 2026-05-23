@@ -1,14 +1,25 @@
 # Hysteria2 client config — device2 (port 1444)
 # Place at: ~/Library/Application Support/hysteria/client.yaml
+#
+# On macOS 26.5 with two physical NICs (en0 + en1), use the UDP proxy workaround:
+#   server points to 127.0.0.1:9443 (hysteria-udp-proxy.py)
+#   The proxy binds its outgoing socket to en1 explicitly, bypassing the kernel
+#   sendmsg EADDRNOTAVAIL bug triggered by dual-NIC source-address selection.
+# On single-NIC or working systems, set server to the real IP directly.
 
-server: <PRIMARY_SERVER_IP>:443
+server: 127.0.0.1:9443    # proxy; set to <PRIMARY_SERVER_IP>:443 if no proxy needed
 
 auth: <YOUR_AUTH_PASSWORD>
 
 tls:
   sni: <YOUR_HOSTNAME>       # e.g. nebuchadnezzar.fireshare.uk
+  insecure: false
+
+transport:
+  udp:
+    hopInterval: 0s
 
 udpForwarding:
   - listen: 127.0.0.1:1444  # AmneziaWG connects here (different port from device1)
-    remote: 127.0.0.1:51820 # AmneziaWG server port (relative to server)
+    remote: 127.0.0.1:51820  # AmneziaWG server port (relative to server)
     timeout: 0s

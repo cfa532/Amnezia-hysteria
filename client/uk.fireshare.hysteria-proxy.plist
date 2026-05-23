@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- UDP proxy LaunchAgent — required on macOS 26.5 with dual physical NICs.
+     Must load before uk.fireshare.hysteria. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>uk.fireshare.hysteria-proxy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/REPLACE_USER/bin/hysteria-udp-proxy.py</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/hysteria-proxy.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hysteria-proxy.log</string>
+</dict>
+</plist>
