@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchDaemon (system-level, runs as root) — required for route commands -->
+<!-- Install to: /Library/LaunchDaemons/ -->
+<!-- Load with: sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>uk.fireshare.hysteria-route</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/fix-hysteria-route.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/hysteria-route.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hysteria-route.log</string>
+</dict>
+</plist>

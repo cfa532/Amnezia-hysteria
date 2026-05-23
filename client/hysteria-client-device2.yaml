@@ -1,0 +1,14 @@
+# Hysteria2 client config — device2 (port 1444)
+# Place at: ~/Library/Application Support/hysteria/client.yaml
+
+server: <PRIMARY_SERVER_IP>:443
+
+auth: <YOUR_AUTH_PASSWORD>
+
+tls:
+  sni: <YOUR_HOSTNAME>       # e.g. nebuchadnezzar.fireshare.uk
+
+udpForwarding:
+  - listen: 127.0.0.1:1444  # AmneziaWG connects here (different port from device1)
+    remote: 127.0.0.1:51820 # AmneziaWG server port (relative to server)
+    timeout: 0s

@@ -1,0 +1,15 @@
+listen: :443
+
+tls:
+  cert: /etc/ssl/<YOUR_DOMAIN>/fullchain.pem
+  key: /etc/ssl/<YOUR_DOMAIN>/key.pem
+
+auth:
+  type: password
+  password: <YOUR_AUTH_PASSWORD>
+
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.bing.com/
+    rewriteHost: true

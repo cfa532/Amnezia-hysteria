@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchAgent (user-level) — runs every 2 minutes to check server health -->
+<!-- Install to: ~/Library/LaunchAgents/ -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>uk.fireshare.hysteria-failover</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/hysteria-failover-client.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>120</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/hysteria-failover-client.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hysteria-failover-client.log</string>
+</dict>
+</plist>
