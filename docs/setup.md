@@ -1,7 +1,7 @@
 # Morphous VPN — Setup Documentation
 
 **Date:** 2026-05-23  
-**Author:** cfa532  
+**Author:** user  
 
 ---
 
@@ -14,7 +14,7 @@ Morphous VPN is a censorship-resistant VPN stack designed to bypass GFW throttli
 
 ### Why Hysteria2?
 
-GFW aggressively throttles TCP connections to Alibaba Cloud Singapore (8.222.164.32), limiting throughput to ~26 KB/s (a 20 MB SCP transfer takes 12+ minutes). QUIC (UDP) is not throttled on this path. Hysteria2 tunnels AmneziaWG's UDP packets over QUIC, achieving 750 KB/s–3.9 MB/s — a 30–150× improvement over the previous wstunnel (WebSocket/TCP) transport.
+GFW aggressively throttles TCP connections to Alibaba Cloud Singapore (<SERVER_1_IP>), limiting throughput to ~26 KB/s (a 20 MB SCP transfer takes 12+ minutes). QUIC (UDP) is not throttled on this path. Hysteria2 tunnels AmneziaWG's UDP packets over QUIC, achieving 750 KB/s–3.9 MB/s — a 30–150× improvement over the previous wstunnel (WebSocket/TCP) transport.
 
 ### Previous Setup (wstunnel)
 
@@ -32,7 +32,7 @@ AmneziaWG → wstunnel WebSocket → TCP → server. Throttled to ~8.5 KB/s by G
     ↓ UDP to 127.0.0.1:1443 (Sequoia) or 127.0.0.1:1444 (Tahoe)
   Hysteria2 client (QUIC/UDP)
     ↓ QUIC over UDP port 443 → ISP → internet
-  Hysteria2 server (a1, 8.222.164.32:443)
+  Hysteria2 server (a1, <SERVER_1_IP>:443)
     ↓ UDP forwarded to 127.0.0.1:51820
   AmneziaWG server (awg0, port 51820)
     ↓
@@ -47,17 +47,17 @@ AmneziaWG → wstunnel WebSocket → TCP → server. Throttled to ~8.5 KB/s by G
 
 | Property | Value |
 |----------|-------|
-| IP | 8.222.164.32 |
+| IP | <SERVER_1_IP> |
 | OS | Ubuntu (systemd) |
-| SSH | `ssh -i ~/Documents/Gen8/a1-singa.pem root@8.222.164.32` |
+| SSH | `ssh -i ~/.ssh/your-key.pem root@<SERVER_1_IP>` |
 
 ### tn2 — Second Server
 
 | Property | Value |
 |----------|-------|
-| IP | 43.160.238.86 |
+| IP | <SERVER_2_IP> |
 | OS | Ubuntu (systemd) |
-| SSH | `ssh -i ~/Documents/Gen8/a1-singa.pem root@43.160.238.86` |
+| SSH | `ssh -i ~/.ssh/your-key.pem root@<SERVER_2_IP>` |
 
 **Services:**
 - **Hysteria2**: UDP/443, config `/etc/hysteria/server.yaml`, `systemctl status hysteria`
@@ -73,7 +73,7 @@ AmneziaWG → wstunnel WebSocket → TCP → server. Throttled to ~8.5 KB/s by G
 | (spare) | `CiaYmUfzbj/8Rd5SrEpkULclZHGnyq9o2LShO1c0hU4=` | 10.8.0.4 |
 | (spare) | `eHIU8XgQgnL1Pt1SRgo7RK2QM/oJ0LJW4yy1Dimw4EU=` | 10.8.0.5 |
 
-To switch a client to tn2, change `server:` in `client.yaml` to `43.160.238.86:443`. The AmneziaWG profiles are unchanged (same server public key, same local Hysteria2 endpoints).
+To switch a client to tn2, change `server:` in `client.yaml` to `<SERVER_2_IP>:443`. The AmneziaWG profiles are unchanged (same server public key, same local Hysteria2 endpoints).
 
 #### Hysteria2 Server
 
@@ -86,8 +86,8 @@ To switch a client to tn2, change `server:` in `client.yaml` to `43.160.238.86:4
 listen: :443
 
 tls:
-  cert: /etc/ssl/nebuchadnezzar/fullchain.pem
-  key: /etc/ssl/nebuchadnezzar/key.pem
+  cert: /etc/ssl/<your-domain>/fullchain.pem
+  key: /etc/ssl/<your-domain>/key.pem
 
 auth:
   type: password
@@ -128,7 +128,7 @@ iptables -A FORWARD -i wg0 -j ACCEPT
 
 ---
 
-## Client: Sequoia (cfa532@Sequoia-2)
+## Client: Sequoia (device1)
 
 ### Network Interfaces
 
@@ -146,12 +146,12 @@ iptables -A FORWARD -i wg0 -j ACCEPT
 
 **`client.yaml`:**
 ```yaml
-server: 8.222.164.32:443
+server: <SERVER_1_IP>:443
 
-auth: morphous-hy2-2026
+auth: <YOUR_AUTH_PASSWORD>
 
 tls:
-  sni: nebuchadnezzar.fireshare.uk
+  sni: <YOUR_HOSTNAME>
   insecure: false
 
 transport:
@@ -193,16 +193,16 @@ AllowedIPs = <all IPs except server IPs — see conf file>
 PersistentKeepalive = 25
 ```
 
-The `AllowedIPs` is a split-tunnel list covering all IPs **except** `8.222.164.32` and `43.160.238.86` (server IPs), which are excluded so Hysteria2 traffic never loops back into the VPN.
+The `AllowedIPs` is a split-tunnel list covering all IPs **except** `<SERVER_1_IP>` and `<SERVER_2_IP>` (server IPs), which are excluded so Hysteria2 traffic never loops back into the VPN.
 
 ### Routing Fix (Critical)
 
-**Problem:** When AmneziaWG activates, macOS adds a spurious host route `8.222.164.32 → utun` even though that IP is excluded from AllowedIPs. This causes Hysteria2's QUIC packets to loop into the VPN tunnel.
+**Problem:** When AmneziaWG activates, macOS adds a spurious host route `<SERVER_1_IP> → utun` even though that IP is excluded from AllowedIPs. This causes Hysteria2's QUIC packets to loop into the VPN tunnel.
 
 **Fix:** A static host route via the WiFi gateway takes precedence over the cloned utun route:
 ```bash
-sudo route delete -host 8.222.164.32 2>/dev/null
-sudo route add -host 8.222.164.32 192.168.10.1
+sudo route delete -host <SERVER_1_IP> 2>/dev/null
+sudo route add -host <SERVER_1_IP> 192.168.10.1
 ```
 
 **Persistence:** A LaunchDaemon runs as root using `route monitor` for reactive fixing — corrects the route immediately when AmneziaWG changes it, with no polling delay.
@@ -210,7 +210,7 @@ sudo route add -host 8.222.164.32 192.168.10.1
 Script (`~/bin/fix-hysteria-route.sh`):
 ```bash
 #!/bin/bash
-TARGET=8.222.164.32
+TARGET=<SERVER_1_IP>
 IFACE=en1
 
 fix_route() {
@@ -248,7 +248,7 @@ LaunchDaemon plist at `/tmp/hysteria-route-sequoia.plist` — **not yet installe
 
 ---
 
-## Client: Tahoe (cfa533@Tahoe)
+## Client: Tahoe (device2)
 
 ### Network Interfaces
 
@@ -268,12 +268,12 @@ LaunchDaemon plist at `/tmp/hysteria-route-sequoia.plist` — **not yet installe
 
 **`client.yaml`:**
 ```yaml
-server: 8.222.164.32:443
+server: <SERVER_1_IP>:443
 
-auth: morphous-hy2-2026
+auth: <YOUR_AUTH_PASSWORD>
 
 tls:
-  sni: nebuchadnezzar.fireshare.uk
+  sni: <YOUR_HOSTNAME>
 
 udpForwarding:
   - listen: 127.0.0.1:1444
@@ -313,7 +313,7 @@ Same spurious host route problem as Sequoia. **Fixed and persistent.**
 ## Key Problems Encountered
 
 ### 1. GFW TCP Throttling
-TCP to 8.222.164.32 throttled to ~26 KB/s. Confirmed by 12+ minute SCP of 20 MB file. QUIC (UDP) is unthrottled — Hysteria2 solves this.
+TCP to <SERVER_1_IP> throttled to ~26 KB/s. Confirmed by 12+ minute SCP of 20 MB file. QUIC (UDP) is unthrottled — Hysteria2 solves this.
 
 ### 2. AmneziaWG Port Conflict
 AmneziaWG server was on UDP 443, conflicting with Hysteria2. Moved AmneziaWG to UDP 51820 via `awg set wg0 listen-port 51820`.
@@ -323,7 +323,7 @@ macOS clones a host route for IPs adjacent to VPN subnet boundaries, even if tho
 
 ### 4. QUIC Timeout Through Soft Router
 Hysteria2's QUIC packets were double-tunnelled through the soft router's own VPN, causing NAT/QUIC incompatibility. Fixed by:
-- Adding 8.222.164.32 and 43.160.238.86 to soft router bypass list (direct ISP for these IPs)
+- Adding <SERVER_1_IP> and <SERVER_2_IP> to soft router bypass list (direct ISP for these IPs)
 - Using WiFi (en1) path that bypasses the soft router entirely
 
 ### 5. UDP Port 4443 Blocked
@@ -372,4 +372,4 @@ SSH from Sequoia to Tahoe kept failing with "Too many authentication failures" d
 | `wg0.conf` | `/etc/amnezia/amneziawg/` on tn2 | AmneziaWG server config |
 | `fix-hysteria-route.sh` | `/usr/local/bin/` (Sequoia) | Route fix script — reactive `route monitor` loop |
 | `uk.fireshare.hysteria-route.plist` | `/Library/LaunchDaemons/` (Sequoia) | Route fix LaunchDaemon (KeepAlive, runs as root) |
-| `a1-singa.pem` | `~/Documents/Gen8/` | SSH key for both a1 and tn2 |
+| `your-key.pem` | `~/.ssh/` | SSH key for both servers |

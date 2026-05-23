@@ -41,7 +41,7 @@ UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUI
 
 ### Why split-tunnel (not full-tunnel)?
 
-AmneziaWG's `AllowedIPs` excludes the Hysteria2 server IPs (`8.222.164.32`, `43.160.238.86`). If these IPs were inside the tunnel, Hysteria2's own QUIC packets would be captured by WireGuard, creating an infinite loop. Split-tunnel ensures Hysteria2 traffic always exits via the physical interface.
+AmneziaWG's `AllowedIPs` excludes the Hysteria2 server IPs (`<SERVER_1_IP>`, `<SERVER_2_IP>`). If these IPs were inside the tunnel, Hysteria2's own QUIC packets would be captured by WireGuard, creating an infinite loop. Split-tunnel ensures Hysteria2 traffic always exits via the physical interface.
 
 ### macOS Routing Quirk
 
@@ -76,7 +76,7 @@ Two servers (a1 in Singapore, tn2 in a separate region) provide redundancy:
        ▼
   ┌─────────────────────┐     ┌─────────────────────┐
   │  a1 (Singapore)     │     │  tn2 (backup)        │
-  │  8.222.164.32       │     │  43.160.238.86        │
+  │  <SERVER_1_IP>       │     │  <SERVER_2_IP>        │
   │                     │     │                       │
   │  Hysteria2 :443/UDP │     │  Hysteria2 :443/UDP   │
   │       │             │     │       │               │
@@ -86,7 +86,7 @@ Two servers (a1 in Singapore, tn2 in a separate region) provide redundancy:
   └─────────────────────┘     └─────────────────────┘
            │                           │
            └──────── Cloudflare DNS ───┘
-                nebuchadnezzar.fireshare.uk
+                <YOUR_HOSTNAME>
                    (both A records, TTL=60)
 ```
 
@@ -259,7 +259,7 @@ H1 = 11223 / H2 = 44556 / H3 = 77889 / H4 = 99001
 PublicKey = <SERVER_PUBLIC_KEY>
 Endpoint = 127.0.0.1:1443
 AllowedIPs = 0.0.0.0/1, 128.0.0.0/2, 192.0.0.0/9, 192.128.0.0/11, ...
-             # All IPs EXCEPT the Hysteria2 server IPs (8.222.164.32, 43.160.238.86)
+             # All IPs EXCEPT the Hysteria2 server IPs (<SERVER_1_IP>, <SERVER_2_IP>)
 PersistentKeepalive = 25
 ```
 
@@ -338,7 +338,7 @@ tail -f /tmp/hysteria-route.log
 tail -f /tmp/hysteria-failover-client.log
 
 # Network
-route get 8.222.164.32           # Should show via en1 (WiFi), not utun
+route get <SERVER_1_IP>           # Should show via en1 (WiFi), not utun
 curl https://ipinfo.io/ip        # Should return VPN server IP when tunnel is up
 ```
 

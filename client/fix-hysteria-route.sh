@@ -10,7 +10,7 @@
 # Deploy as a LaunchDaemon (root) so it can run `route` commands without sudo.
 # See: uk.fireshare.hysteria-route.plist
 
-TARGET=<HYSTERIA2_SERVER_IP>   # e.g. 8.222.164.32
+TARGET=<HYSTERIA2_SERVER_IP>   # e.g. <SERVER_1_IP>
 IFACE=en1                       # WiFi interface (direct home router, no soft router)
 
 fix_route() {

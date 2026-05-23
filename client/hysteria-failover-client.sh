@@ -6,8 +6,8 @@
 # DNS to the VPN server, which is unreachable when the tunnel is down).
 
 YAML="$HOME/Library/Application Support/hysteria/client.yaml"
-PRIMARY="<PRIMARY_SERVER_IP>"     # e.g. 8.222.164.32
-BACKUP="<BACKUP_SERVER_IP>"       # e.g. 43.160.238.86
+PRIMARY="<PRIMARY_SERVER_IP>"     # e.g. <SERVER_1_IP>
+BACKUP="<BACKUP_SERVER_IP>"       # e.g. <SERVER_2_IP>
 LOG="/tmp/hysteria-failover-client.log"
 
 current=$(grep '^server:' "$YAML" | sed 's/server: //;s|:443||;s/ //g')
