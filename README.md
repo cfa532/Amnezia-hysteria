@@ -1,4 +1,4 @@
-# AmneziaWG + Hysteria2 Anti-Censorship VPN
+# AmneziaWG + Hysteria2 VPN
 
 A VPN stack that bypasses GFW deep-packet inspection and TCP throttling using AmneziaWG (obfuscated WireGuard) tunnelled over Hysteria2 (QUIC/UDP).
 
