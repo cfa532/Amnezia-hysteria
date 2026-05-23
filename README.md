@@ -41,7 +41,7 @@ UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUI
 
 ### Why split-tunnel (not full-tunnel)?
 
-AmneziaWG's `AllowedIPs` excludes the Hysteria2 server IPs (`<SERVER_1_IP>`, `<SERVER_2_IP>`). If these IPs were inside the tunnel, Hysteria2's own QUIC packets would be captured by WireGuard, creating an infinite loop. Split-tunnel ensures Hysteria2 traffic always exits via the physical interface.
+AmneziaWG's `AllowedIPs` excludes all Hysteria2 server IPs. If any server IP were inside the tunnel, Hysteria2's own QUIC packets would be captured by WireGuard, creating an infinite loop. When adding a new server, its IP must be excluded from `AllowedIPs` on every client profile.
 
 ### macOS Routing Quirk
 
@@ -49,12 +49,18 @@ macOS clones a host route for the VPN server IP onto the `utun` interface when A
 
 **Fix:** A `route monitor`-based LaunchDaemon (runs as root, reacts instantly to route table changes) maintains a static host route (`UGHS` flag) to the VPN server via the WiFi gateway. This takes precedence over the cloned utun route. The gateway is detected dynamically via `ipconfig getoption en1 router` — hardcoding breaks when the client moves to a different subnet.
 
-### Two-Server Architecture with Failover
+### Server Farm with Round-Robin Load Balancing
 
-Two servers (a1 in Singapore, tn2 in a separate region) provide redundancy:
+The architecture is designed to scale to N servers across regions. All server management is driven by a single `config/servers.conf` file — adding a server requires only appending one line there and deploying it to the new machine; no script changes are needed.
 
-- **Server-side failover:** Each server monitors the other every 2 minutes. If the peer is unreachable, it removes the peer's A record from Cloudflare DNS (TTL=60s).
-- **Client-side failover:** Each client checks whether its current server is reachable every 2 minutes. If not, it switches `client.yaml` to the other server's IP and restarts Hysteria2. This is IP-based (no DNS dependency), which avoids a bootstrap problem: AmneziaWG sets system DNS to the VPN server's address, so DNS resolution fails when the tunnel is down.
+**Load distribution (client-side round-robin):**
+Each client picks a random starting server on first run. This distributes steady-state connections across the farm without coordination. The chosen index is persisted so the client stays on its assigned server across restarts, only moving on failure.
+
+**Failover (two independent layers):**
+- **Server-side:** Each server monitors all peers listed in `servers.conf` every 2 minutes. If a peer is unreachable, its A record is removed from Cloudflare DNS (TTL=60s). When it recovers, the record is restored. This uses only the free Cloudflare DNS REST API — not the paid Load Balancer product.
+- **Client-side:** Each client pings its current server every 2 minutes via the static `en1` host route (bypasses the VPN, no DNS needed). On failure, it round-robins through the remaining servers in order, switches `client.yaml` to the first responsive one, and restarts Hysteria2. Completely independent of DNS and Cloudflare.
+
+**Future:** A region-selection UI will let users pick a preferred server. The client script will honour a `PREFERRED_REGION` setting and select matching servers first before falling back to round-robin.
 
 ---
 
@@ -216,12 +222,24 @@ WantedBy=multi-user.target
 systemctl enable --now hysteria
 ```
 
-#### 5. Set Up Server-Side Failover
+#### 5. Deploy the Server Registry
 
-See `server/failover.sh`. Deploy to both servers, set `MY_IP` and `PEER_IP`, then add to crontab:
+The server farm is driven by a single config file. Copy it to each server:
 
 ```bash
-chmod +x /usr/local/bin/hysteria-failover.sh
+mkdir -p /usr/local/etc/hysteria
+cp config/servers.conf /usr/local/etc/hysteria/servers.conf
+# Edit to replace placeholders with real IPs
+```
+
+#### 6. Set Up Server-Side Failover
+
+See `server/failover.sh`. Set `MY_IP` (this server's IP) — the peer list is read from `servers.conf`. Deploy to all servers:
+
+```bash
+cp server/failover.sh /usr/local/bin/hysteria-failover.sh
+# Edit MY_IP, CF_TOKEN, CF_ZONE, RECORD_NAME
+chmod 600 /usr/local/bin/hysteria-failover.sh
 (crontab -l; echo '*/2 * * * * /usr/local/bin/hysteria-failover.sh') | crontab -
 ```
 
@@ -265,7 +283,7 @@ PersistentKeepalive = 25
 
 Import this profile into the AmneziaWG macOS app.
 
-#### 3. Install Hysteria2 Client
+#### 3. Install Hysteria2 Client and Server Registry
 
 Download the arm64 binary:
 ```bash
@@ -275,6 +293,14 @@ chmod +x ~/bin/hysteria
 ```
 
 Create `~/Library/Application Support/hysteria/client.yaml` (see `client/hysteria-client-device1.yaml`).
+
+Copy the server registry alongside it:
+```bash
+cp config/servers.conf ~/Library/Application\ Support/hysteria/servers.conf
+# Edit to replace placeholders with real IPs
+```
+
+The client failover script reads `servers.conf` to discover all servers. On first run it picks a random server, distributing load across devices.
 
 #### 4. Install LaunchAgents and LaunchDaemons
 
@@ -308,13 +334,25 @@ Both Hysteria2 server IPs must be excluded from the WireGuard tunnel's `AllowedI
 
 ## Maintenance
 
+### Adding a New Server
+
+1. Provision the server and follow **Server Setup** steps 1–6
+2. Append a line to `config/servers.conf`: `<new-ip>  <region>  443`
+3. Deploy the updated `servers.conf` to `/usr/local/etc/hysteria/servers.conf` on **all existing servers**
+4. Deploy the updated `servers.conf` to `~/Library/Application Support/hysteria/servers.conf` on **all clients**
+5. Add the new server's IP to `AllowedIPs` exclusions in every AmneziaWG client profile (prevents routing loop)
+6. Add an A record for `<YOUR_HOSTNAME>` pointing to the new server IP in Cloudflare DNS
+
+No changes to any script are needed.
+
 ### Adding a New Device
 
 1. Generate a key pair on the new device
-2. Add the public key to `/etc/amnezia/amneziawg/wg0.conf` (or `/etc/wireguard/awg0.conf`) on both servers with a new VPN IP
+2. Add the public key to `/etc/amnezia/amneziawg/wg0.conf` (or `/etc/wireguard/awg0.conf`) on all servers with a new VPN IP
 3. Run `awg syncconf wg0 <(awg-quick strip /path/to/wg0.conf)` to apply without restart
 4. Create AmneziaWG profile and `client.yaml` from the templates in `client/`
-5. Install LaunchAgents and LaunchDaemon as above
+5. Copy `servers.conf` to `~/Library/Application Support/hysteria/servers.conf`
+6. Install LaunchAgents and LaunchDaemon as above
 
 ### Rotating Credentials
 
@@ -373,19 +411,21 @@ tail -f /tmp/hysteria-failover-client.log
 ```
 .
 ├── README.md
+├── config/
+│   └── servers.conf          # Server farm registry — single source of truth for all scripts
 ├── docs/
 │   └── setup.md              # Full deployment diary and problem log
 ├── server/
 │   ├── hysteria-server.yaml  # Hysteria2 server config template
-│   └── failover.sh           # Server-side Cloudflare DNS failover script
+│   └── failover.sh           # Server-side Cloudflare DNS monitor (reads servers.conf)
 ├── client/
-│   ├── hysteria-client-device1.yaml      # Hysteria2 client config (device1/port 1443)
-│   ├── hysteria-client-device2.yaml      # Hysteria2 client config (device2/port 1444)
-│   ├── fix-hysteria-route.sh             # macOS route fix (reactive, dynamic gateway)
-│   ├── hysteria-failover-client.sh       # Client-side server failover script
-│   ├── uk.fireshare.hysteria.plist       # Hysteria2 LaunchAgent
-│   ├── uk.fireshare.hysteria-route.plist # Route fix LaunchDaemon (runs as root)
-│   └── uk.fireshare.hysteria-failover.plist  # Failover LaunchAgent
+│   ├── hysteria-client-device1.yaml         # Hysteria2 client config (device1/port 1443)
+│   ├── hysteria-client-device2.yaml         # Hysteria2 client config (device2/port 1444)
+│   ├── fix-hysteria-route.sh                # macOS route fix (reactive, dynamic gateway)
+│   ├── hysteria-failover-client.sh          # Client load balancer and failover (reads servers.conf)
+│   ├── uk.fireshare.hysteria.plist          # Hysteria2 LaunchAgent
+│   ├── uk.fireshare.hysteria-route.plist    # Route fix LaunchDaemon (runs as root)
+│   └── uk.fireshare.hysteria-failover.plist # Load balancer LaunchAgent (runs every 2 min)
 └── amneziawg/
     └── device-template.conf  # AmneziaWG client profile template
 ```
