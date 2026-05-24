@@ -66,11 +66,32 @@ chmod +x ~/bin/hysteria
 mkdir -p ~/Library/Application\ Support/hysteria
 ```
 
-### 2.3 Write client.yaml
+### 2.3 Write servers.conf
+
+Use the `macN-servers.conf` file provided by the admin. It lists your preferred server first:
 
 ```bash
-cat > ~/Library/Application\ Support/hysteria/client.yaml << 'EOF'
-server: 8.222.164.32:80
+cp macN-servers.conf ~/Library/Application\ Support/hysteria/servers.conf
+```
+
+Example format:
+```
+# ip           region      port
+8.222.164.32   singapore   80
+43.160.238.86  singapore   80
+```
+
+### 2.4 Write client.yaml
+
+This derives the initial server address from servers.conf so nothing is hardcoded:
+
+```bash
+FIRST_SERVER=$(grep -Ev '^\s*(#|$)' \
+    ~/Library/Application\ Support/hysteria/servers.conf \
+    | awk 'NR==1{print $1":"$3}')
+
+cat > ~/Library/Application\ Support/hysteria/client.yaml << EOF
+server: ${FIRST_SERVER}
 
 auth: morphous-hy2-2026
 
@@ -89,22 +110,7 @@ udpForwarding:
 EOF
 ```
 
-The failover script will update `server:` automatically if the primary server becomes unreachable.
-
-### 2.4 Write servers.conf
-
-Use the `macN-servers.conf` file provided by the admin. It lists preferred server first:
-
-```bash
-cp macN-servers.conf ~/Library/Application\ Support/hysteria/servers.conf
-```
-
-Example format:
-```
-# ip           region      port
-8.222.164.32   singapore   80
-43.160.238.86  singapore   80
-```
+The failover script will update `server:` automatically if the active server becomes unreachable.
 
 ### 2.5 Fix the routing loop
 
