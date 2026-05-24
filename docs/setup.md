@@ -24,6 +24,10 @@ AmneziaWG → wstunnel WebSocket → TCP → server. Throttled to ~8.5 KB/s by G
 
 ## Architecture
 
+Two transport modes are supported depending on the client type:
+
+### Mode A — Hysteria2 Transport (macOS, high-throughput)
+
 ```
 [Client: Mac]
   App traffic
@@ -32,12 +36,27 @@ AmneziaWG → wstunnel WebSocket → TCP → server. Throttled to ~8.5 KB/s by G
     ↓ UDP to 127.0.0.1:1443 (Sequoia) or 127.0.0.1:1444 (Tahoe)
   Hysteria2 client (QUIC/UDP)
     ↓ QUIC over UDP port 443 → ISP → internet
-  Hysteria2 server (a1, <SERVER_1_IP>:443)
+  Hysteria2 server (<YOUR_DOMAIN>:443)
     ↓ UDP forwarded to 127.0.0.1:51820
   AmneziaWG server (awg0, port 51820)
     ↓
   Internet (NAT via eth0)
 ```
+
+### Mode B — Direct AmneziaWG (iOS, Android, additional macOS)
+
+```
+[Client: iOS / Android / Mac]
+  App traffic
+    ↓
+  AmneziaWG (obfuscated WireGuard)
+    ↓ UDP directly to <YOUR_DOMAIN>:443
+  AmneziaWG server (awg0, port 443)
+    ↓
+  Internet (NAT via eth0)
+```
+
+Mode B is used for mobile devices because Hysteria2 apps are unavailable in the China App Store. ISP/NAT only allows UDP 443, so awg0 must run on port 443. Both servers share the same awg0 private key so DNS round-robin is transparent to clients.
 
 ---
 
@@ -59,72 +78,42 @@ AmneziaWG → wstunnel WebSocket → TCP → server. Throttled to ~8.5 KB/s by G
 | OS | Ubuntu (systemd) |
 | SSH | `ssh -i ~/.ssh/your-key.pem root@<SERVER_2_IP>` |
 
-**Services:**
-- **Hysteria2**: UDP/443, config `/etc/hysteria/server.yaml`, `systemctl status hysteria`
-- **AmneziaWG**: UDP/51820, config `/etc/amnezia/amneziawg/wg0.conf`, `systemctl status awg-quick@wg0`
-- **wstunnel**: TCP/443 (legacy WebSocket transport, kept for backward compatibility), `systemctl status wstunnel`
+**Services (per server):**
 
-**Registered peers on tn2:**
+| Service | Port | Config | Notes |
+|---------|------|--------|-------|
+| `awg-quick@awg0` | UDP/443 | `/etc/amnezia/amneziawg/awg0.conf` | Direct mobile/mac clients |
+| `hysteria-4443` | UDP/4443 | `/etc/hysteria/server-4443.yaml` | Hysteria2 transport for Sequoia/Tahoe |
 
-| Device | Public Key | VPN IP |
-|--------|-----------|--------|
-| Sequoia (device1) | `gXM4mZQBlX9/wF+X4I+DhhAkwTgnVZV/sP58AhUOsjA=` | 10.8.0.2 |
-| Tahoe (device2) | `Ls4WuxfPXoMWNlNsKyoflzRGB+FhstL/l260fW7f8GI=` | 10.8.0.3 |
-| (spare) | `CiaYmUfzbj/8Rd5SrEpkULclZHGnyq9o2LShO1c0hU4=` | 10.8.0.4 |
-| (spare) | `eHIU8XgQgnL1Pt1SRgo7RK2QM/oJ0LJW4yy1Dimw4EU=` | 10.8.0.5 |
+> **Note:** Both servers share the same awg0 private key so DNS round-robin (`<YOUR_DOMAIN>:443`) is transparent to mobile clients. Hysteria2 transport clients connect directly to individual server IPs.
 
-To switch a client to tn2, change `server:` in `client.yaml` to `<SERVER_2_IP>:443`. The AmneziaWG profiles are unchanged (same server public key, same local Hysteria2 endpoints).
+#### AmneziaWG Server (awg0) — Direct Mode
 
-#### Hysteria2 Server
+- Config: `/etc/amnezia/amneziawg/awg0.conf`  (see `server/awg0-server.conf` template)
+- Listen port: **UDP 443** — required; ISP blocks all other UDP ports
+- Subnet: `10.8.0.0/24`, Server IP: `10.8.0.1`
+- Same private key on all servers — identical pubkey presented to every client
 
-- Binary: `/usr/local/bin/hysteria`
-- Config: `/etc/hysteria/server.yaml` (port 443) and `server-4443.yaml` (port 4443, for testing only)
-- Service: `systemctl status hysteria` and `hysteria-4443`
-
-**`/etc/hysteria/server.yaml`:**
-```yaml
-listen: :443
-
-tls:
-  cert: /etc/ssl/<your-domain>/fullchain.pem
-  key: /etc/ssl/<your-domain>/key.pem
-
-auth:
-  type: password
-  password: "<YOUR_AUTH_PASSWORD>"
-
-masquerade:
-  type: proxy
-  proxy:
-    url: https://www.bing.com/
-    rewriteHost: true
-```
-
-The masquerade makes Hysteria2 look like an HTTPS server to passive observers — QUIC connections that don't authenticate get a valid Bing response.
-
-#### AmneziaWG Server
-
-- Interface: `wg0` (awg0)
-- Config: `/etc/wireguard/awg0.conf`
-- Listen port: **UDP 51820** (moved from 443 to avoid conflict with Hysteria2)
-- VPN subnet: `10.8.0.0/24`
-- Server VPN IP: `10.8.0.1`
-
-**Peers registered on server:**
-
-| Device | Public Key | VPN IP |
-|--------|-----------|--------|
-| Sequoia (device1) | `gXM4mZQBlX9/wF+X4I+DhhAkwTgnVZV/sP58AhUOsjA=` | 10.8.0.2 |
-| Tahoe (device2) | `Ls4WuxfPXoMWNlNsKyoflzRGB+FhstL/l260fW7f8GI=` | 10.8.0.3 |
-
-**Server public key:** `5LIkWD1IpDRYgMesUUbatwofnsn8AVK2p3cFfgANJyA=`
-
-**IP forwarding and NAT** are enabled:
+**Critical iptables setup** — UFW runs before appended rules; FORWARD rules must be inserted at position 1:
 ```bash
-sysctl net.ipv4.ip_forward = 1
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-iptables -A FORWARD -i wg0 -j ACCEPT
+# In awg0.conf PostUp (NOT -A, which appends after UFW and is silently dropped):
+iptables -I FORWARD 1 -i awg0 -j ACCEPT
+iptables -I FORWARD 1 -o awg0 -j ACCEPT
 ```
+
+**Watch for routing conflicts:** If another WireGuard interface (e.g. `wg0`) is up with the same subnet, the kernel routes return packets through the wrong interface and clients get no responses. Always disable/stop conflicting interfaces:
+```bash
+systemctl disable awg-quick@wg0
+ip link set wg0 down
+```
+
+#### Hysteria2 Server (port 4443) — Transport Mode
+
+- Config: `/etc/hysteria/server-4443.yaml`
+- Service: `systemctl status hysteria-4443`
+- Template: `server/hysteria-server.yaml`
+
+The original hysteria.service (port 443) is removed — awg0 owns port 443.
 
 ---
 
@@ -345,11 +334,47 @@ SSH from Sequoia to Tahoe kept failing with "Too many authentication failures" d
 
 ---
 
+## Direct AmneziaWG Clients (Mode B)
+
+For iOS, Android, and additional macOS devices. No Hysteria2 required — AmneziaWG connects directly to `<YOUR_DOMAIN>:443`.
+
+### iOS / Android
+
+Import `amneziawg/ios-direct-template.conf` into the AmneziaWG app. Generate a unique keypair per device:
+```bash
+awg genkey | tee device.priv | awg pubkey > device.pub
+```
+Add the peer to `/etc/amnezia/amneziawg/awg0.conf` on **all servers** (same peer list on every server):
+```ini
+[Peer]
+# <device-name>
+PublicKey = <DEVICE_PUBLIC_KEY>
+AllowedIPs = 10.8.0.<N>/32
+```
+Then reload: `awg syncconf awg0 <(awg-quick strip awg0)`
+
+### macOS (additional machines)
+
+Use `amneziawg/mac-direct-template.conf`. Key difference from mobile: `AllowedIPs` uses split-route to avoid the macOS 26.5 sendmsg bug — `0.0.0.0/0` causes the VPN interface to become the default route before the handshake, breaking the handshake itself on some macOS versions.
+
+### IP Assignment
+
+| Device | VPN IP |
+|--------|--------|
+| mac1 | 10.8.0.2 |
+| mac2 | 10.8.0.3 |
+| mac3 | 10.8.0.4 |
+| ios1 | 10.8.0.5 |
+| ios2 | 10.8.0.6 |
+| Next device | 10.8.0.7, 10.8.0.8, ... |
+
+---
+
 ## Pending Tasks
 
-1. **iOS/Android clients** — Set up Hysteria2 + AmneziaWG on mobile devices (ShadowRocket or similar supports Hysteria2).
-
-2. **DNS failover** — Configure DNS so clients automatically switch between a1 and tn2 when one server goes down.
+1. **Reboot test persistence** — Verify awg0 starts cleanly after reboot on both servers (no wg0 conflict, no Hysteria2 on 443).
+2. **iOS/Android setup** — Import ios1/ios2 configs via QR code from AmneziaWG app.
+3. **Commercial expansion** — Current shared-private-key approach is for personal use only. At scale, replace with per-server keypairs + health-check LB (Cloudflare/AWS NLB) + management plane (Headscale or custom).
 
 ---
 
