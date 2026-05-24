@@ -156,6 +156,9 @@ def _split_allowed_ips() -> str:
                             detail="split-allowed-ips.txt not found on server")
     return SPLIT_IPS_PATH.read_text().strip()
 
+AWG_DIRECT_ENDPOINT = "nebuchadnezzar.fireshare.uk:51820"
+AWG_HY2_ENDPOINT    = "127.0.0.1:1443"   # local Hysteria2 UDP forwarder (macOS only)
+
 def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
                    os_type: str, routing: str = "full") -> str:
     if routing == "split":
@@ -164,6 +167,11 @@ def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
         allowed = "0.0.0.0/0, ::/0"
     else:
         allowed = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"
+
+    # iOS has no local Hysteria2 daemon — connect directly to the server.
+    # macOS runs Hysteria2 locally and routes AWG traffic through it.
+    endpoint = AWG_DIRECT_ENDPOINT if os_type == "ios" else AWG_HY2_ENDPOINT
+
     return (
         f"[Interface]\n"
         f"PrivateKey = {privkey}\n"
@@ -173,7 +181,7 @@ def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
         f"{AWG_OBF}\n\n"
         f"[Peer]\n"
         f"PublicKey = {server_pubkey}\n"
-        f"Endpoint = 127.0.0.1:1443\n"   # local Hysteria2 UDP forwarder
+        f"Endpoint = {endpoint}\n"
         f"AllowedIPs = {allowed}\n"
         f"PersistentKeepalive = 25\n"
     )
