@@ -16,6 +16,16 @@ This repository has three independent branches. Each represents a distinct archi
 
 ---
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [docs/client-setup.md](docs/client-setup.md) | Set up the VPN client on a regular macOS machine |
+| [docs/tahoe-setup.md](docs/tahoe-setup.md) | Set up Tahoe (mac2) — dual-NIC debug machine |
+| [docs/regional-lb-design.md](docs/regional-lb-design.md) | Architecture: shared keypair, load balancing, provisioning API |
+
+---
+
 ## The Problem
 
 GFW applies two layers of interference to overseas VPN traffic:
