@@ -98,7 +98,13 @@ def ssh_awg_remove(server: dict, pubkey: str):
 
 # ── Server selection ───────────────────────────────────────────────────────────
 
-def _available_in_region(region: str, cfg: dict, health: dict) -> list[dict]:
+def _provisioned_count(server_name: str, state: dict) -> int:
+    """Count active provisioned clients whose preferred server is this one."""
+    return sum(1 for c in state["clients"].values()
+               if c.get("preferred_server") == server_name and c.get("active"))
+
+def _available_in_region(region: str, cfg: dict, health: dict,
+                          state: dict) -> list[dict]:
     """Return config server dicts that are healthy + available in the given region."""
     region_names = set(cfg.get("regions", {}).get(region, {}).get("servers", []))
     result = []
@@ -107,11 +113,17 @@ def _available_in_region(region: str, cfg: dict, health: dict) -> list[dict]:
             continue
         h = health["servers"].get(s["name"], {})
         if h.get("healthy") and h.get("available"):
-            result.append({**s, "_active_peers": h.get("active_peers", 0)})
+            result.append({
+                **s,
+                "_active_peers":     h.get("active_peers", 0),
+                "_provisioned":      _provisioned_count(s["name"], state),
+            })
     return result
 
 def _least_loaded(servers: list[dict]) -> dict:
-    return min(servers, key=lambda s: s["_active_peers"])
+    # Primary sort: live active peers (health state, updates every 30s)
+    # Tiebreaker: provisioned client count (clients.json, updates immediately)
+    return min(servers, key=lambda s: (s["_active_peers"], s["_provisioned"]))
 
 
 # ── IP allocation (global pool) ────────────────────────────────────────────────
@@ -219,7 +231,7 @@ def provision(req: ProvisionRequest,
         state["clients"][req.device_name]["active"] = False
 
     # Select preferred server — least loaded, healthy + available, in region
-    candidates = _available_in_region(req.region, cfg, health)
+    candidates = _available_in_region(req.region, cfg, health, state)
     if not candidates:
         raise HTTPException(status_code=503,
                             detail=f"No servers available in region '{req.region}'")
