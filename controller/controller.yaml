@@ -1,21 +1,40 @@
-# VPN health controller configuration
-# Copy to /etc/vpn-controller/controller.yaml on the controller server.
-# Values here override environment variables.
+# VPN controller configuration
+# Deploy to /etc/vpn-controller/controller.yaml on the controller server.
 
 dns:
   cf_api_token: "<CF_API_TOKEN>"
   cf_zone_id: "<CF_ZONE_ID>"
-  record_name: "<YOUR_DOMAIN>"   # e.g. nebuchadnezzar.fireshare.uk
+  record_name: "nebuchadnezzar.fireshare.uk"
   ttl: 60
 
 check_interval: 30       # seconds between health check rounds
-fail_threshold: 3        # consecutive failures before removing from DNS
+fail_threshold: 3        # consecutive SSH failures before removing from DNS
 recover_threshold: 2     # consecutive successes before adding back to DNS
+
+# Region map — determines which servers are candidates for each region.
+# Add new regions here; no code changes needed.
+regions:
+  asia:
+    servers: [a1, tn2]
+  # us:
+  #   servers: [us1]
+
+# Shared AWG identity — all servers use this same keypair.
+# Generate once: awg genkey | tee /tmp/shared.key | awg pubkey
+awg:
+  shared_privkey: "<SHARED_AWG_PRIVATE_KEY>"
+  shared_pubkey:  "<SHARED_AWG_PUBLIC_KEY>"
+  client_subnet:  "10.8.0.0/24"   # global pool; 10.8.0.1 reserved as gateway
 
 servers:
   - name: a1
-    ip: "<SERVER_1_IP>"
-    health_port: 8080
+    ip: "8.222.164.32"
+    region: asia
+    max_peers: 50
+    ssh_key: /etc/vpn-controller/a1-singa.pem
+
   - name: tn2
-    ip: "<SERVER_2_IP>"
-    health_port: 8080
+    ip: "43.160.238.86"
+    region: asia
+    max_peers: 50
+    ssh_pass: "<TN2_SSH_PASSWORD>"

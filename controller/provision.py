@@ -2,37 +2,46 @@
 """
 VPN provisioning API.
 
-POST /provision   — assign client to least-loaded healthy server, return config
-GET  /clients     — list all provisioned clients
-DELETE /clients/{device_name} — revoke client (removes peer from server)
+POST   /provision              — assign client to least-loaded server in region
+GET    /clients                — list all provisioned clients
+DELETE /clients/{device_name} — revoke client (removes peer from all servers)
 
-State: /etc/vpn-controller/clients.json
+Server health and active_peers are read from /var/run/vpn-health.json,
+written every 30s by health.py. No duplicate SSH health checks at provision time.
+
+Peer registration is pushed to ALL servers so that Hysteria2 failover is
+transparent — the client works regardless of which server Hysteria2 routes to.
 """
 
-import json
-import subprocess
-import logging
 import ipaddress
+import json
+import logging
+import subprocess
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Header
-from pydantic import BaseModel
 import uvicorn
 import yaml
+from fastapi import FastAPI, HTTPException, Header
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s")
 
-CONFIG_PATH = Path("/etc/vpn-controller/controller.yaml")
-STATE_PATH  = Path("/etc/vpn-controller/clients.json")
-API_TOKEN_PATH = Path("/etc/vpn-controller/api.token")
+CONFIG_PATH  = Path("/etc/vpn-controller/controller.yaml")
+STATE_PATH   = Path("/etc/vpn-controller/clients.json")
+TOKEN_PATH   = Path("/etc/vpn-controller/api.token")
+HEALTH_STATE = Path("/var/run/vpn-health.json")
+
+HEALTH_STALE_SECS = 90   # refuse to provision if health data is older than this
 
 app = FastAPI(title="VPN Provisioning API")
 
 
-# ── Config & state ────────────────────────────────────────────────────────────
+# ── Config & state ─────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
     with open(CONFIG_PATH) as f:
@@ -41,218 +50,236 @@ def load_config() -> dict:
 def load_state() -> dict:
     if STATE_PATH.exists():
         return json.loads(STATE_PATH.read_text())
-    return {"clients": {}, "server_keys": {}}
+    return {"clients": {}}
 
 def save_state(state: dict):
     STATE_PATH.write_text(json.dumps(state, indent=2))
 
-def load_api_token() -> str:
-    return API_TOKEN_PATH.read_text().strip() if API_TOKEN_PATH.exists() else ""
+def load_token() -> str:
+    return TOKEN_PATH.read_text().strip() if TOKEN_PATH.exists() else ""
+
+def load_health() -> dict:
+    if not HEALTH_STATE.exists():
+        raise HTTPException(status_code=503,
+                            detail="Health state unavailable — controller not running")
+    data = json.loads(HEALTH_STATE.read_text())
+    age = time.time() - data.get("updated_at", 0)
+    if age > HEALTH_STALE_SECS:
+        raise HTTPException(status_code=503,
+                            detail=f"Health state stale ({age:.0f}s) — controller may be down")
+    return data
 
 
-# ── SSH helpers ───────────────────────────────────────────────────────────────
+# ── SSH helpers ────────────────────────────────────────────────────────────────
 
 def _ssh_args(server: dict) -> list[str]:
     base = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
     if server.get("ssh_key"):
-        return ["ssh", "-i", server["ssh_key"]] + base + ["-o", "BatchMode=yes", f"root@{server['ip']}"]
+        return (["ssh", "-i", server["ssh_key"]]
+                + base + ["-o", "BatchMode=yes", f"root@{server['ip']}"])
     elif server.get("ssh_pass"):
-        return ["sshpass", "-p", server["ssh_pass"], "ssh"] + base + [f"root@{server['ip']}"]
+        return (["sshpass", "-p", server["ssh_pass"], "ssh"]
+                + base + [f"root@{server['ip']}"])
     raise RuntimeError(f"No SSH credentials for {server['name']}")
-
-def _ssh_check(server: dict) -> bool:
-    """Return True if awg-quick@awg0 is active on the server (via SSH)."""
-    try:
-        args = _ssh_args(server) + ["systemctl is-active awg-quick@awg0"]
-        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
-        ok = r.returncode == 0
-        if ok:
-            log.info(f"Health OK: {server['name']}")
-        else:
-            log.warning(f"Health FAIL: {server['name']} (awg-quick@awg0 not active)")
-        return ok
-    except Exception as e:
-        log.warning(f"Health check error for {server['name']}: {e}")
-        return False
 
 def _ssh(server: dict, cmd: str):
     args = _ssh_args(server) + [cmd]
-    result = subprocess.run(args, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"SSH failed on {server['name']}: {result.stderr}")
+    r = subprocess.run(args, capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise RuntimeError(f"SSH failed on {server['name']}: {r.stderr.strip()}")
+
+def ssh_awg_add(server: dict, client_ip: str, pubkey: str):
+    _ssh(server, f"awg set awg0 peer {pubkey} allowed-ips {client_ip}/32 && "
+                 f"awg-quick save awg0")
+
+def ssh_awg_remove(server: dict, pubkey: str):
+    _ssh(server, f"awg set awg0 peer {pubkey} remove && awg-quick save awg0")
 
 
-# ── Server health ─────────────────────────────────────────────────────────────
+# ── Server selection ───────────────────────────────────────────────────────────
 
-def get_healthy_servers(cfg: dict) -> list[dict]:
-    return [s for s in cfg["servers"] if _ssh_check(s)]
+def _available_in_region(region: str, cfg: dict, health: dict) -> list[dict]:
+    """Return config server dicts that are healthy + available in the given region."""
+    region_names = set(cfg.get("regions", {}).get(region, {}).get("servers", []))
+    result = []
+    for s in cfg["servers"]:
+        if s["name"] not in region_names:
+            continue
+        h = health["servers"].get(s["name"], {})
+        if h.get("healthy") and h.get("available"):
+            result.append({**s, "_active_peers": h.get("active_peers", 0)})
+    return result
 
-def peer_count(server_ip: str, state: dict) -> int:
-    return sum(1 for c in state["clients"].values()
-               if c["server_ip"] == server_ip and c["active"])
-
-def least_loaded(servers: list[dict], state: dict) -> dict:
-    return min(servers, key=lambda s: peer_count(s["ip"], state))
+def _least_loaded(servers: list[dict]) -> dict:
+    return min(servers, key=lambda s: s["_active_peers"])
 
 
-# ── IP allocation ─────────────────────────────────────────────────────────────
+# ── IP allocation (global pool) ────────────────────────────────────────────────
 
-def allocate_ip(server: dict, state: dict) -> str:
-    subnet = ipaddress.IPv4Network(server["subnet"])
-    used = {c["client_ip"] for c in state["clients"].values()
-            if c["server_ip"] == server["ip"] and c["active"]}
+def allocate_ip(cfg: dict, state: dict) -> str:
+    subnet = ipaddress.IPv4Network(cfg["awg"]["client_subnet"])
+    used = {c["client_ip"] for c in state["clients"].values() if c["active"]}
+    gateway = str(subnet.network_address + 1)   # 10.8.0.1 reserved
     for host in subnet.hosts():
         ip = str(host)
-        if ip == server["gateway"]:
+        if ip == gateway:
             continue
         if ip not in used:
             return ip
-    raise RuntimeError(f"No IPs available on {server['name']}")
+    raise RuntimeError("Global client IP pool exhausted")
 
 
-# ── awg peer management ───────────────────────────────────────────────────────
+# ── Config generation ──────────────────────────────────────────────────────────
 
-def ssh_awg_add(server: dict, client_ip: str, device_pubkey: str):
-    cmd = (f"awg set awg0 peer {device_pubkey} allowed-ips {client_ip}/32 && "
-           f"awg-quick save awg0")
-    _ssh(server, cmd)
+AWG_OBF = (
+    "Jc = 4\nJmin = 40\nJmax = 70\n"
+    "S1 = 30\nS2 = 40\nS3 = 30\nS4 = 40\n"
+    "H1 = 11223\nH2 = 44556\nH3 = 77889\nH4 = 99001"
+)
 
-def ssh_awg_remove(server: dict, device_pubkey: str):
-    cmd = f"awg set awg0 peer {device_pubkey} remove && awg-quick save awg0"
-    _ssh(server, cmd)
+def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
+                   os_type: str) -> str:
+    allowed = ("0.0.0.0/0, ::/0" if os_type == "ios"
+               else "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1")
+    return (
+        f"[Interface]\n"
+        f"PrivateKey = {privkey}\n"
+        f"Address = {client_ip}/32\n"
+        f"DNS = 8.8.8.8, 1.1.1.1\n"
+        f"MTU = 1280\n"
+        f"{AWG_OBF}\n\n"
+        f"[Peer]\n"
+        f"PublicKey = {server_pubkey}\n"
+        f"Endpoint = 127.0.0.1:1443\n"   # local Hysteria2 UDP forwarder
+        f"AllowedIPs = {allowed}\n"
+        f"PersistentKeepalive = 25\n"
+    )
 
-
-# ── Config generation ─────────────────────────────────────────────────────────
-
-OBF = """
-Jc = 4
-Jmin = 40
-Jmax = 70
-S1 = 30
-S2 = 40
-S3 = 30
-S4 = 40
-H1 = 11223
-H2 = 44556
-H3 = 77889
-H4 = 99001"""
-
-def make_config(device_privkey: str, client_ip: str, server_pubkey: str,
-                endpoint: str, os_type: str) -> str:
-    if os_type == "ios":
-        allowed = "0.0.0.0/0, ::/0"
-    else:
-        # macOS split-route: avoids macOS 26.5 sendmsg bug
-        allowed = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"
-
-    return f"""[Interface]
-PrivateKey = {device_privkey}
-Address = {client_ip}/32
-DNS = 8.8.8.8, 1.1.1.1
-MTU = 1280
-{OBF}
-
-[Peer]
-PublicKey = {server_pubkey}
-Endpoint = {endpoint}
-AllowedIPs = {allowed}
-PersistentKeepalive = 25
-"""
+def make_servers_conf(preferred: dict, all_servers: list[dict],
+                      hysteria_port: int = 80) -> str:
+    """Generate Hysteria2 servers.conf with preferred server first."""
+    lines = [
+        "# Hysteria2 server list — generated by provisioning API",
+        "# Format: <ip>  <region>  <port>",
+        f"{preferred['ip']:<20} {preferred.get('region','asia'):<12} {hysteria_port}",
+    ]
+    for s in all_servers:
+        if s["ip"] != preferred["ip"]:
+            lines.append(
+                f"{s['ip']:<20} {s.get('region','asia'):<12} {hysteria_port}"
+            )
+    return "\n".join(lines) + "\n"
 
 
-# ── API ───────────────────────────────────────────────────────────────────────
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+def _auth(token: Optional[str]):
+    expected = load_token()
+    if expected and token != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# ── API models ─────────────────────────────────────────────────────────────────
 
 class ProvisionRequest(BaseModel):
     device_name: str
     device_pubkey: str
-    device_privkey: str   # generated client-side; never stored beyond config gen
-    os_type: str = "macos"  # "macos" | "ios" | "android"
+    device_privkey: str    # generated client-side; never stored
+    os_type: str = "macos" # "macos" | "ios" | "android"
+    region: str = "asia"
 
 class ProvisionResponse(BaseModel):
     device_name: str
     server_name: str
     server_pubkey: str
     client_ip: str
-    endpoint: str
     wg_config: str
+    servers_conf: str
 
 
-def _auth(token: Optional[str]):
-    expected = load_api_token()
-    if expected and token != f"Bearer {expected}":
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/provision", response_model=ProvisionResponse)
 def provision(req: ProvisionRequest,
               authorization: Optional[str] = Header(None)):
     _auth(authorization)
-    cfg = load_config()
-    state = load_state()
+    cfg    = load_config()
+    state  = load_state()
+    health = load_health()
 
-    # Revoke existing assignment for this device if any
+    # Revoke existing assignment — remove peer from every server
     if req.device_name in state["clients"]:
         old = state["clients"][req.device_name]
         if old["active"]:
-            try:
-                server = next(s for s in cfg["servers"]
-                              if s["ip"] == old["server_ip"])
-                ssh_awg_remove(server, old["device_pubkey"])
-            except Exception as e:
-                log.warning(f"Could not remove old peer for {req.device_name}: {e}")
+            for s in cfg["servers"]:
+                try:
+                    ssh_awg_remove(s, old["device_pubkey"])
+                except Exception as e:
+                    log.warning(f"Could not remove old peer from {s['name']}: {e}")
         state["clients"][req.device_name]["active"] = False
 
-    healthy = get_healthy_servers(cfg)
-    if not healthy:
-        raise HTTPException(status_code=503, detail="No healthy servers available")
+    # Select preferred server — least loaded, healthy + available, in region
+    candidates = _available_in_region(req.region, cfg, health)
+    if not candidates:
+        raise HTTPException(status_code=503,
+                            detail=f"No servers available in region '{req.region}'")
+    preferred = _least_loaded(candidates)
 
-    server = least_loaded(healthy, state)
-    server_pubkey = state["server_keys"].get(server["ip"], "")
-    if not server_pubkey:
-        raise HTTPException(status_code=500,
-                            detail=f"No pubkey registered for {server['name']}")
+    shared_pubkey = cfg["awg"]["shared_pubkey"]
+    client_ip = allocate_ip(cfg, state)
 
-    client_ip = allocate_ip(server, state)
-    endpoint = f"{cfg['dns']['record_name']}:443"
+    # Push peer to ALL servers — failover works regardless of which server
+    # Hysteria2 routes to
+    errors = []
+    for s in cfg["servers"]:
+        try:
+            ssh_awg_add(s, client_ip, req.device_pubkey)
+        except Exception as e:
+            errors.append(s["name"])
+            log.error(f"Failed to add peer to {s['name']}: {e}")
+    if errors:
+        log.warning(f"Peer push failed on: {errors} — failover to these servers"
+                    f" will not work until resolved")
 
-    ssh_awg_add(server, client_ip, req.device_pubkey)
-
+    # Persist
     state["clients"][req.device_name] = {
-        "device_pubkey": req.device_pubkey,
-        "server_ip": server["ip"],
-        "server_name": server["name"],
-        "client_ip": client_ip,
-        "os_type": req.os_type,
-        "active": True,
+        "device_pubkey":  req.device_pubkey,
+        "preferred_server": preferred["name"],
+        "client_ip":      client_ip,
+        "region":         req.region,
+        "os_type":        req.os_type,
+        "active":         True,
         "provisioned_at": datetime.utcnow().isoformat(),
     }
     save_state(state)
 
-    wg_config = make_config(req.device_privkey, client_ip, server_pubkey,
-                            endpoint, req.os_type)
+    wg_config    = make_wg_config(req.device_privkey, client_ip,
+                                   shared_pubkey, req.os_type)
+    servers_conf = make_servers_conf(preferred, cfg["servers"])
 
-    log.info(f"Provisioned {req.device_name} → {server['name']} ({client_ip})")
+    log.info(f"Provisioned {req.device_name} → preferred={preferred['name']}"
+             f" ip={client_ip} region={req.region}")
+
     return ProvisionResponse(
         device_name=req.device_name,
-        server_name=server["name"],
-        server_pubkey=server_pubkey,
+        server_name=preferred["name"],
+        server_pubkey=shared_pubkey,
         client_ip=client_ip,
-        endpoint=endpoint,
         wg_config=wg_config,
+        servers_conf=servers_conf,
     )
 
 
 @app.get("/clients")
 def list_clients(authorization: Optional[str] = Header(None)):
     _auth(authorization)
-    state = load_state()
-    return {"clients": state["clients"]}
+    return {"clients": load_state()["clients"]}
 
 
 @app.delete("/clients/{device_name}")
 def revoke(device_name: str, authorization: Optional[str] = Header(None)):
     _auth(authorization)
-    cfg = load_config()
+    cfg   = load_config()
     state = load_state()
 
     if device_name not in state["clients"]:
@@ -260,12 +287,11 @@ def revoke(device_name: str, authorization: Optional[str] = Header(None)):
 
     client = state["clients"][device_name]
     if client["active"]:
-        try:
-            server = next(s for s in cfg["servers"]
-                          if s["ip"] == client["server_ip"])
-            ssh_awg_remove(server, client["device_pubkey"])
-        except Exception as e:
-            log.warning(f"Could not remove peer for {device_name}: {e}")
+        for s in cfg["servers"]:
+            try:
+                ssh_awg_remove(s, client["device_pubkey"])
+            except Exception as e:
+                log.warning(f"Could not remove peer from {s['name']}: {e}")
 
     state["clients"][device_name]["active"] = False
     save_state(state)
