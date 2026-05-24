@@ -31,10 +31,10 @@ servers:
     ip: "8.222.164.32"
     region: asia
     max_peers: 50
-    ssh_key: /etc/vpn-controller/a1-singa.pem
+    ssh_pass: "<ROOT_SSH_PASSWORD>"
 
   - name: tn2
     ip: "43.160.238.86"
     region: asia
     max_peers: 50
-    ssh_pass: "<TN2_SSH_PASSWORD>"
+    ssh_pass: "<ROOT_SSH_PASSWORD>"
