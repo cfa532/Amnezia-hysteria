@@ -28,13 +28,13 @@ awg:
 
 servers:
   - name: a1
-    ip: "8.222.164.32"
+    ip: "<A1_IP>"
     region: singapore
     max_peers: 50
     ssh_pass: "<ROOT_SSH_PASSWORD>"
 
   - name: tn2
-    ip: "43.160.238.86"
+    ip: "<TN2_IP>"
     region: singapore
     max_peers: 50
     ssh_pass: "<ROOT_SSH_PASSWORD>"

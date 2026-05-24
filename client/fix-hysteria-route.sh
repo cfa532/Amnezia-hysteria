@@ -1,9 +1,17 @@
 #!/bin/bash
-TARGETS=(
-    8.222.164.32
-    43.160.238.86
-)
+SERVERS_CONF="$HOME/Library/Application Support/hysteria/servers.conf"
 IFACE=en1
+
+# Read server IPs from servers.conf at runtime — no hardcoded addresses
+TARGETS=()
+while IFS= read -r _line; do
+    TARGETS+=("$_line")
+done < <(grep -Ev '^\s*(#|$)' "$SERVERS_CONF" 2>/dev/null | awk '{print $1}')
+
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+    echo "$(date) ERROR: no servers found in $SERVERS_CONF" >&2
+    exit 1
+fi
 
 fix_route() {
     local target="$1"

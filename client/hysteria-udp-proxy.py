@@ -46,7 +46,8 @@ def get_current_server():
     except Exception:
         pass
     if not servers:
-        return ('8.222.164.32', 80)
+        print(f'ERROR: no servers in {SERVERS_CONF}', flush=True)
+        return None
     try:
         idx = int(open(STATE_FILE).read().strip()) % len(servers)
     except Exception:
@@ -108,7 +109,11 @@ def main():
             continue
 
         if client_addr not in sessions:
-            server_ip, server_port = get_current_server()
+            server = get_current_server()
+            if server is None:
+                print('no server available, dropping packet', flush=True)
+                continue
+            server_ip, server_port = server
             cur_ip = get_iface_ip(BIND_IFACE) or bind_ip
             try:
                 rs = make_remote_socket(server_ip, server_port, cur_ip)
