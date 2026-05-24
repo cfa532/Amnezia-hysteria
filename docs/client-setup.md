@@ -1,0 +1,228 @@
+# Client Setup (macOS)
+
+Sets up the VPN client on a regular macOS machine. "Regular" means a single active physical network interface — the machine connects to the internet through one router with no built-in VPN.
+
+> If you are setting up **Tahoe**, stop here and read [tahoe-setup.md](tahoe-setup.md) instead.
+
+```
+AmneziaWG app ──UDP──▶ 127.0.0.1:1443 (Hysteria2 UDP forwarder)
+                              │
+                    Hysteria2 client (QUIC over UDP :80)
+                              │
+                    VPN server — nebuchadnezzar.fireshare.uk
+                              │
+                         awg0 (AmneziaWG)
+                              │
+                           internet
+```
+
+## Prerequisites
+
+- macOS 13 Ventura or later
+- Your provisioned config files from the admin:
+  - `macN.conf` — AmneziaWG tunnel config (unique to your device)
+  - `macN-servers.conf` — Hysteria2 server list for your region
+
+---
+
+## Step 1 — AmneziaWG
+
+### Install
+
+Download from the Mac App Store: search **AmneziaWG**.
+
+### Import your config
+
+1. Open AmneziaWG → **+** → **Import tunnel(s) from file**
+2. Select your `macN.conf`
+3. Click **Allow** when macOS prompts to add a VPN configuration
+
+> **Each `.conf` file is device-specific.** Two devices sharing the same file will knock each other offline every ~25 seconds (WireGuard's session rekey).
+
+The tunnel config has `Endpoint = 127.0.0.1:1443`. This is intentional — it points to the local Hysteria2 forwarder, not directly to the server. Do not change it.
+
+---
+
+## Step 2 — Hysteria2
+
+Hysteria2 runs as a background daemon. It connects to the VPN server over QUIC (UDP port 80) and exposes `127.0.0.1:1443`, which AmneziaWG uses as its endpoint.
+
+### 2.1 Install the binary
+
+```bash
+mkdir -p ~/bin
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/')
+curl -L "https://github.com/apernet/hysteria/releases/latest/download/hysteria-darwin-${ARCH}" \
+     -o ~/bin/hysteria
+chmod +x ~/bin/hysteria
+~/bin/hysteria version
+```
+
+### 2.2 Create the config directory
+
+```bash
+mkdir -p ~/Library/Application\ Support/hysteria
+```
+
+### 2.3 Write servers.conf
+
+Copy the `macN-servers.conf` provided by the admin. It lists your preferred server first:
+
+```bash
+cp macN-servers.conf ~/Library/Application\ Support/hysteria/servers.conf
+```
+
+Format:
+```
+# ip           region      port
+8.222.164.32   singapore   80
+43.160.238.86  singapore   80
+```
+
+### 2.4 Write client.yaml
+
+Derives the initial server from servers.conf — no hardcoded IPs:
+
+```bash
+FIRST_SERVER=$(grep -Ev '^\s*(#|$)' \
+    ~/Library/Application\ Support/hysteria/servers.conf \
+    | awk 'NR==1{print $1":"$3}')
+
+cat > ~/Library/Application\ Support/hysteria/client.yaml << EOF
+server: ${FIRST_SERVER}
+
+auth: morphous-hy2-2026
+
+tls:
+  sni: nebuchadnezzar.fireshare.uk
+  insecure: false
+
+transport:
+  udp:
+    hopInterval: 0s
+
+udpForwarding:
+  - listen: 127.0.0.1:1443
+    remote: 127.0.0.1:51820
+    timeout: 0s
+EOF
+```
+
+The failover monitor updates `server:` automatically when it switches servers.
+
+### 2.5 Fix the routing loop
+
+When AmneziaWG is active, all traffic — including Hysteria2's own QUIC packets — is routed through the tunnel. This creates a loop: Hysteria2 tries to reach the server, which goes through the tunnel, which needs Hysteria2, and the connection collapses.
+
+The fix is permanent host routes for the server IPs, pointing directly at the physical gateway instead of the tunnel interface. The route-fix daemon installs and maintains these routes.
+
+```bash
+sudo cp ~/Documents/GitHub/Amnezia-hysteria/client/fix-hysteria-route.sh \
+     /usr/local/bin/fix-hysteria-route.sh
+sudo chmod +x /usr/local/bin/fix-hysteria-route.sh
+
+sudo cp ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria-route.plist \
+     /Library/LaunchDaemons/
+
+sudo launchctl bootstrap system \
+     /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist
+```
+
+Verify:
+```bash
+route get 8.222.164.32    # interface must be en0/en1, NOT utunX
+route get 43.160.238.86
+```
+
+### 2.6 Install the Hysteria2 LaunchAgent
+
+```bash
+sed "s|<USERNAME>|$(whoami)|g" \
+    ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria.plist \
+    > ~/Library/LaunchAgents/uk.fireshare.hysteria.plist
+
+launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria.plist
+```
+
+Verify:
+```bash
+launchctl list | grep hysteria
+tail -20 /tmp/hysteria-mac.log   # look for "connected to server"
+```
+
+### 2.7 Install the failover monitor
+
+Runs every 2 minutes. Pings the active server; round-robins to the next one in servers.conf if unreachable.
+
+```bash
+cp ~/Documents/GitHub/Amnezia-hysteria/client/hysteria-failover-client.sh \
+   ~/bin/hysteria-failover-client.sh
+chmod +x ~/bin/hysteria-failover-client.sh
+
+cp ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria-failover.plist \
+   ~/Library/LaunchAgents/
+
+launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria-failover.plist
+```
+
+---
+
+## Split routing
+
+Your provisioned `.conf` has `AllowedIPs` set to all non-Chinese IP ranges. Chinese sites route direct via your ISP; everything else goes through the VPN.
+
+If provisioned with `routing=full`, `AllowedIPs = 0.0.0.0/0, ::/0` and all traffic goes through the VPN. Contact the admin to switch.
+
+---
+
+## Verification
+
+```bash
+# Hysteria2 running
+launchctl list uk.fireshare.hysteria
+
+# Connected to server
+tail -30 /tmp/hysteria-mac.log
+
+# Failover monitor active
+launchctl list uk.fireshare.hysteria-failover
+tail -20 /tmp/hysteria-failover-client.log
+
+# Routes bypass the tunnel
+route get 8.222.164.32    # must show en0/en1, not utunX
+
+# Traffic exits through VPN
+curl -s https://api.ipify.org   # should return the VPN server IP, not your ISP IP
+```
+
+---
+
+## Troubleshooting
+
+### Hysteria2 keeps restarting
+
+```bash
+tail -50 /tmp/hysteria-mac.log
+```
+
+- **TLS error**: `sni:` must be `nebuchadnezzar.fireshare.uk`
+- **Connection refused**: server is down — failover picks another within 2 minutes
+- **Auth failed**: `auth:` must be `morphous-hy2-2026`
+
+### AmneziaWG shows no handshake
+
+1. Hysteria2 running: `launchctl list uk.fireshare.hysteria`
+2. Forwarder listening: `netstat -an | grep 1443`
+3. Tunnel endpoint is `127.0.0.1:1443` (not the server IP)
+
+### No internet when tunnel is on (routing loop)
+
+```bash
+sudo launchctl list uk.fireshare.hysteria-route
+route get 8.222.164.32           # must NOT show utunX
+sudo /usr/local/bin/fix-hysteria-route.sh   # manual fix
+```
+
+### Failover not switching
+
+The failover script pings servers directly via the host routes. If the route-fix daemon is not running, pings go into the tunnel and always appear to succeed, hiding a real outage. Check the route-fix daemon first.
