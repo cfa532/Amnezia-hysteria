@@ -123,4 +123,4 @@ AllowedIPs = 0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1
 
 - **AllowedIPs = full tunnel**: all traffic (including Chinese sites) exits through the VPN server. This is intentional for now — split-tunnel by country is a future feature.
 - **DNS**: the config uses `8.8.8.8, 1.1.1.1` via the tunnel. If you prefer a different DNS, edit the `DNS =` line before importing.
-- **Failover**: if the VPN server is unreachable, toggle the tunnel off and back on. DNS round-robin may route you to a different healthy server on reconnect. Automated failover is on the roadmap.
+- **Failover**: if your VPN server goes down, your tunnel will drop. The health controller automatically removes the failed server from DNS within ~90 seconds. Contact the admin to reprovision your device — you'll be assigned to the healthy server and get a new config file to import. Automated client-side failover is on the roadmap.
