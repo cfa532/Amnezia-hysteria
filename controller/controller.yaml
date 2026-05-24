@@ -1,0 +1,21 @@
+# VPN health controller configuration
+# Copy to /etc/vpn-controller/controller.yaml on the controller server.
+# Values here override environment variables.
+
+dns:
+  cf_api_token: "<CF_API_TOKEN>"
+  cf_zone_id: "<CF_ZONE_ID>"
+  record_name: "<YOUR_DOMAIN>"   # e.g. nebuchadnezzar.fireshare.uk
+  ttl: 60
+
+check_interval: 30       # seconds between health check rounds
+fail_threshold: 3        # consecutive failures before removing from DNS
+recover_threshold: 2     # consecutive successes before adding back to DNS
+
+servers:
+  - name: a1
+    ip: "<SERVER_1_IP>"
+    health_port: 8080
+  - name: tn2
+    ip: "<SERVER_2_IP>"
+    health_port: 8080

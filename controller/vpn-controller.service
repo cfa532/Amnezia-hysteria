@@ -1,0 +1,17 @@
+[Unit]
+Description=VPN regional health controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vpn-controller
+ExecStart=/usr/bin/python3 /opt/vpn-controller/health.py
+Restart=always
+RestartSec=10
+# Config file at /etc/vpn-controller/controller.yaml
+# Or pass via environment:
+# EnvironmentFile=/etc/vpn-controller/controller.env
+
+[Install]
+WantedBy=multi-user.target

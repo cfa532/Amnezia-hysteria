@@ -1,0 +1,15 @@
+[Unit]
+Description=AmneziaWG health sidecar
+After=awg-quick@awg0.service
+Wants=awg-quick@awg0.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/awg-health.py
+Restart=always
+RestartSec=5
+User=nobody
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
