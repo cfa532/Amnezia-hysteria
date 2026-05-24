@@ -37,6 +37,7 @@ TOKEN_PATH   = Path("/etc/vpn-controller/api.token")
 HEALTH_STATE = Path("/var/run/vpn-health.json")
 
 HEALTH_STALE_SECS = 90   # refuse to provision if health data is older than this
+SPLIT_IPS_PATH    = Path("/etc/vpn-controller/split-allowed-ips.txt")
 
 app = FastAPI(title="VPN Provisioning API")
 
@@ -149,10 +150,20 @@ AWG_OBF = (
     "H1 = 11223\nH2 = 44556\nH3 = 77889\nH4 = 99001"
 )
 
+def _split_allowed_ips() -> str:
+    if not SPLIT_IPS_PATH.exists():
+        raise HTTPException(status_code=500,
+                            detail="split-allowed-ips.txt not found on server")
+    return SPLIT_IPS_PATH.read_text().strip()
+
 def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
-                   os_type: str) -> str:
-    allowed = ("0.0.0.0/0, ::/0" if os_type == "ios"
-               else "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1")
+                   os_type: str, routing: str = "full") -> str:
+    if routing == "split":
+        allowed = _split_allowed_ips()
+    elif os_type == "ios":
+        allowed = "0.0.0.0/0, ::/0"
+    else:
+        allowed = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"
     return (
         f"[Interface]\n"
         f"PrivateKey = {privkey}\n"
@@ -197,8 +208,9 @@ class ProvisionRequest(BaseModel):
     device_name: str
     device_pubkey: str
     device_privkey: str    # generated client-side; never stored
-    os_type: str = "macos" # "macos" | "ios" | "android"
-    region: str = "asia"
+    os_type: str = "macos"    # "macos" | "ios" | "android"
+    region: str = "singapore"
+    routing: str = "full"     # "full" (all traffic) | "split" (exclude CN IPs)
 
 class ProvisionResponse(BaseModel):
     device_name: str
@@ -255,18 +267,19 @@ def provision(req: ProvisionRequest,
 
     # Persist
     state["clients"][req.device_name] = {
-        "device_pubkey":  req.device_pubkey,
+        "device_pubkey":    req.device_pubkey,
         "preferred_server": preferred["name"],
-        "client_ip":      client_ip,
-        "region":         req.region,
-        "os_type":        req.os_type,
-        "active":         True,
-        "provisioned_at": datetime.utcnow().isoformat(),
+        "client_ip":        client_ip,
+        "region":           req.region,
+        "os_type":          req.os_type,
+        "routing":          req.routing,
+        "active":           True,
+        "provisioned_at":   datetime.utcnow().isoformat(),
     }
     save_state(state)
 
     wg_config    = make_wg_config(req.device_privkey, client_ip,
-                                   shared_pubkey, req.os_type)
+                                   shared_pubkey, req.os_type, req.routing)
     servers_conf = make_servers_conf(preferred, cfg["servers"])
 
     log.info(f"Provisioned {req.device_name} → preferred={preferred['name']}"

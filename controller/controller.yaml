@@ -14,7 +14,7 @@ recover_threshold: 2     # consecutive successes before adding back to DNS
 # Region map — determines which servers are candidates for each region.
 # Add new regions here; no code changes needed.
 regions:
-  asia:
+  singapore:
     servers: [a1, tn2]
   # us:
   #   servers: [us1]
@@ -29,12 +29,12 @@ awg:
 servers:
   - name: a1
     ip: "8.222.164.32"
-    region: asia
+    region: singapore
     max_peers: 50
     ssh_pass: "<ROOT_SSH_PASSWORD>"
 
   - name: tn2
     ip: "43.160.238.86"
-    region: asia
+    region: singapore
     max_peers: 50
     ssh_pass: "<ROOT_SSH_PASSWORD>"
