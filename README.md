@@ -2,6 +2,20 @@
 
 A VPN stack that bypasses GFW deep-packet inspection and TCP throttling using AmneziaWG (obfuscated WireGuard) tunnelled over Hysteria2 (QUIC/UDP).
 
+---
+
+## Branches
+
+This repository has three independent branches. Each represents a distinct architecture — do not merge them.
+
+| Branch | What it does |
+|--------|-------------|
+| [`main`](../../tree/main) | **AmneziaWG + Hysteria2, manual setup.** Both protocols configured by hand. Client-side round-robin load balancing via a failover shell script. Server-side DNS failover via Cloudflare API. No provisioning server. Reference implementation — start here to understand the stack. **This branch.** |
+| [`regional-lb`](../../tree/regional-lb) | **AmneziaWG only, server-side load balancer.** Hysteria2 is absent. A FastAPI provisioning API assigns clients to the least-loaded server and manages DNS. Health checks via SSH. Use this if you want automated provisioning without the Hysteria2 transport layer. |
+| [`full-stack`](../../tree/full-stack) | **AmneziaWG + Hysteria2 + provisioning API + dynamic load balancer.** The complete production stack. Shared AWG keypair across all servers so failover is transparent — no reprovisioning needed when Hysteria2 switches servers. Split routing (Chinese IPs bypass VPN). Region-aware provisioning. |
+
+---
+
 ## The Problem
 
 GFW applies two layers of interference to overseas VPN traffic:
