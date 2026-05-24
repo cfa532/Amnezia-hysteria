@@ -2,11 +2,11 @@
 """
 Regional VPN health controller.
 
-Polls each server's health sidecar every CHECK_INTERVAL seconds.
+Polls each server's awg0 status via SSH every CHECK_INTERVAL seconds.
 After FAIL_THRESHOLD consecutive failures, removes server from DNS.
 After RECOVER_THRESHOLD consecutive successes, adds server back to DNS.
 
-Config via environment variables or controller.yaml in the same directory.
+Config via controller.yaml.
 """
 
 import os
@@ -14,6 +14,7 @@ import sys
 import time
 import logging
 import json
+import subprocess
 import requests
 import yaml
 from dataclasses import dataclass, field
@@ -36,7 +37,6 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
             return yaml.safe_load(f)
-    # Fall back to environment variables
     return {
         "dns": {
             "cf_api_token": os.environ["CF_API_TOKEN"],
@@ -55,7 +55,8 @@ def load_config() -> dict:
 class ServerState:
     name: str
     ip: str
-    health_url: str
+    ssh_key: str = ""
+    ssh_pass: str = ""
     healthy: bool = True
     dns_record_id: str = ""
     consecutive_failures: int = 0
@@ -95,10 +96,21 @@ class CloudflareDNS:
         return r.json().get("result", [])
 
 
-def check_server(server: ServerState, timeout: int = 5) -> bool:
+def check_server(server: ServerState) -> bool:
+    """Check if awg-quick@awg0 is active on the server via SSH."""
     try:
-        r = requests.get(server.health_url, timeout=timeout)
-        return r.status_code == 200
+        if server.ssh_key:
+            opts = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes"]
+            args = ["ssh", "-i", server.ssh_key] + opts + [f"root@{server.ip}"]
+        elif server.ssh_pass:
+            opts = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
+            args = ["sshpass", "-p", server.ssh_pass, "ssh"] + opts + [f"root@{server.ip}"]
+        else:
+            log.error(f"No SSH credentials for {server.name}")
+            return False
+        args += ["systemctl is-active awg-quick@awg0"]
+        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
+        return r.returncode == 0
     except Exception as e:
         log.debug(f"Health check error for {server.name}: {e}")
         return False
@@ -129,7 +141,8 @@ def run():
         ServerState(
             name=s["name"],
             ip=s["ip"],
-            health_url=f"http://{s['ip']}:{s.get('health_port', 8080)}/health",
+            ssh_key=s.get("ssh_key", ""),
+            ssh_pass=s.get("ssh_pass", ""),
         )
         for s in cfg["servers"]
     ]

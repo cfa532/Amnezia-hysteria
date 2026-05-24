@@ -21,7 +21,6 @@ from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 import uvicorn
 import yaml
-import requests
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -51,19 +50,42 @@ def load_api_token() -> str:
     return API_TOKEN_PATH.read_text().strip() if API_TOKEN_PATH.exists() else ""
 
 
+# ── SSH helpers ───────────────────────────────────────────────────────────────
+
+def _ssh_args(server: dict) -> list[str]:
+    base = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
+    if server.get("ssh_key"):
+        return ["ssh", "-i", server["ssh_key"]] + base + ["-o", "BatchMode=yes", f"root@{server['ip']}"]
+    elif server.get("ssh_pass"):
+        return ["sshpass", "-p", server["ssh_pass"], "ssh"] + base + [f"root@{server['ip']}"]
+    raise RuntimeError(f"No SSH credentials for {server['name']}")
+
+def _ssh_check(server: dict) -> bool:
+    """Return True if awg-quick@awg0 is active on the server (via SSH)."""
+    try:
+        args = _ssh_args(server) + ["systemctl is-active awg-quick@awg0"]
+        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
+        ok = r.returncode == 0
+        if ok:
+            log.info(f"Health OK: {server['name']}")
+        else:
+            log.warning(f"Health FAIL: {server['name']} (awg-quick@awg0 not active)")
+        return ok
+    except Exception as e:
+        log.warning(f"Health check error for {server['name']}: {e}")
+        return False
+
+def _ssh(server: dict, cmd: str):
+    args = _ssh_args(server) + [cmd]
+    result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"SSH failed on {server['name']}: {result.stderr}")
+
+
 # ── Server health ─────────────────────────────────────────────────────────────
 
 def get_healthy_servers(cfg: dict) -> list[dict]:
-    healthy = []
-    for s in cfg["servers"]:
-        try:
-            r = requests.get(f"http://{s['ip']}:{s.get('health_port', 8080)}/health",
-                             timeout=3)
-            if r.status_code == 200:
-                healthy.append(s)
-        except Exception:
-            pass
-    return healthy
+    return [s for s in cfg["servers"] if _ssh_check(s)]
 
 def peer_count(server_ip: str, state: dict) -> int:
     return sum(1 for c in state["clients"].values()
@@ -98,19 +120,6 @@ def ssh_awg_add(server: dict, client_ip: str, device_pubkey: str):
 def ssh_awg_remove(server: dict, device_pubkey: str):
     cmd = f"awg set awg0 peer {device_pubkey} remove && awg-quick save awg0"
     _ssh(server, cmd)
-
-def _ssh(server: dict, cmd: str):
-    if server.get("ssh_key"):
-        args = ["ssh", "-i", server["ssh_key"], "-o", "StrictHostKeyChecking=no",
-                f"root@{server['ip']}", cmd]
-    elif server.get("ssh_pass"):
-        args = ["sshpass", "-p", server["ssh_pass"], "ssh",
-                "-o", "StrictHostKeyChecking=no", f"root@{server['ip']}", cmd]
-    else:
-        raise RuntimeError(f"No SSH credentials for {server['name']}")
-    result = subprocess.run(args, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"SSH failed on {server['name']}: {result.stderr}")
 
 
 # ── Config generation ─────────────────────────────────────────────────────────
