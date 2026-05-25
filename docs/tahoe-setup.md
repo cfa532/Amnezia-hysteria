@@ -1,5 +1,12 @@
 # Tahoe Setup
 
+> **Setup script available.** Tahoe (mac2) and Sequoia (mac1) share the same dual-NIC topology. Use the shared setup script instead of following these manual steps:
+> ```bash
+> cd ~/Documents/GitHub/Amnezia-hysteria/client
+> ./setup-dual-nic.sh mac2
+> ```
+> See [dual-nic-setup.md](dual-nic-setup.md) for full details.
+
 Tahoe (mac2) is a **debug machine**, not a regular VPN client. Its purpose is to test the VPN stack from a clean internet path. This document covers its specific setup.
 
 ---

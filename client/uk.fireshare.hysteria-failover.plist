@@ -9,7 +9,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/usr/local/bin/hysteria-failover-client.sh</string>
+        <string>/Users/REPLACE_USER/bin/hysteria-failover-client.sh</string>
     </array>
     <key>StartInterval</key>
     <integer>120</integer>

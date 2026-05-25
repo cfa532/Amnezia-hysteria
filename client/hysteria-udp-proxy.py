@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""
-UDP proxy for Hysteria2 on macOS.
-
-Listens on 127.0.0.1:LOCAL_PORT (default 9443) and forwards packets to the
-current Hysteria2 server read from servers.conf, binding outgoing sockets to
-BIND_IFACE (default en1). This routes Hysteria2's own UDP traffic via the
-physical NIC regardless of VPN routing table state — avoiding routing loops
-without needing host routes.
-
-Install: copy to ~/bin/hysteria-udp-proxy.py
-Launch: uk.fireshare.hysteria-proxy LaunchAgent
-"""
 import socket, threading, os, subprocess, time
 
 LOCAL_HOST = '127.0.0.1'
@@ -46,8 +34,7 @@ def get_current_server():
     except Exception:
         pass
     if not servers:
-        print(f'ERROR: no servers in {SERVERS_CONF}', flush=True)
-        return None
+        return ('8.222.164.32', 80)
     try:
         idx = int(open(STATE_FILE).read().strip()) % len(servers)
     except Exception:
@@ -109,11 +96,7 @@ def main():
             continue
 
         if client_addr not in sessions:
-            server = get_current_server()
-            if server is None:
-                print('no server available, dropping packet', flush=True)
-                continue
-            server_ip, server_port = server
+            server_ip, server_port = get_current_server()
             cur_ip = get_iface_ip(BIND_IFACE) or bind_ip
             try:
                 rs = make_remote_socket(server_ip, server_port, cur_ip)
