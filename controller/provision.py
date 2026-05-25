@@ -90,8 +90,8 @@ def _ssh(server: dict, cmd: str):
         raise RuntimeError(f"SSH failed on {server['name']}: {r.stderr.strip()}")
 
 def ssh_awg_add(server: dict, client_ip: str, pubkey: str):
-    _ssh(server, f"awg set awg0 peer {pubkey} allowed-ips {client_ip}/32 && "
-                 f"awg-quick save awg0")
+    _ssh(server, f"awg set awg0 peer {pubkey} allowed-ips {client_ip}/32 "
+                 f"advanced-security on && awg-quick save awg0")
 
 def ssh_awg_remove(server: dict, pubkey: str):
     _ssh(server, f"awg set awg0 peer {pubkey} remove && awg-quick save awg0")

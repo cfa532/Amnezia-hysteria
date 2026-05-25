@@ -1,8 +1,9 @@
-# macOS Client Setup
+# Client Setup
 
-Choose the guide that matches your machine:
+Choose the guide that matches your device:
 
 | Document | Who it is for |
 |----------|--------------|
-| [client-setup.md](client-setup.md) | Regular clients — single physical NIC, one upstream router with no built-in VPN |
-| [tahoe-setup.md](tahoe-setup.md) | Tahoe (mac2) — dual-NIC debug machine; wired goes through a soft router with built-in VPN, WiFi is the clean test interface |
+| [client-setup.md](client-setup.md) | macOS — regular clients, single physical NIC, one upstream router |
+| [tahoe-setup.md](tahoe-setup.md) | macOS — Tahoe (mac2), dual-NIC debug machine with soft router on wired |
+| [ios-setup.md](ios-setup.md) | iPhone / iPad — direct UDP connection, no local Hysteria2 |

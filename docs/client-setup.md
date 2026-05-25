@@ -3,6 +3,7 @@
 Sets up the VPN client on a regular macOS machine. "Regular" means a single active physical network interface — the machine connects to the internet through one router with no built-in VPN.
 
 > If you are setting up **Tahoe**, stop here and read [tahoe-setup.md](tahoe-setup.md) instead.
+> If you are setting up an **iPhone or iPad**, stop here and read [ios-setup.md](ios-setup.md) instead.
 
 ```
 AmneziaWG app ──UDP──▶ 127.0.0.1:1443 (Hysteria2 UDP forwarder)
