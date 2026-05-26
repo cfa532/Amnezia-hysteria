@@ -3,3 +3,6 @@ secrets.yaml
 .DS_Store
 __pycache__/
 *.pyc
+
+# Generated client profiles contain private keys. Keep them local.
+/*.conf

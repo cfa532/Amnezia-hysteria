@@ -340,7 +340,35 @@ For iOS, Android, and additional macOS devices. No Hysteria2 required — Amnezi
 
 ### iOS / Android
 
-Import `amneziawg/ios-direct-template.conf` into the AmneziaWG app. Generate a unique keypair per device:
+Provision iOS and Android devices through the controller so the client key is
+registered on every VPN server. Run this on the controller server, or SSH to
+TN2 first:
+
+```bash
+sshpass -p '<TN2_PASSWORD>' ssh -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null root@43.160.238.86
+```
+
+Then provision the device:
+
+```bash
+cd /opt/vpn-controller
+PROVISION_TOKEN='<BEARER_TOKEN>' ./reprovision.sh ios1 ios split /tmp
+PROVISION_TOKEN='<BEARER_TOKEN>' ./reprovision.sh android1 android split /tmp
+```
+
+The command attempted from the admin machine during testing was the same
+password SSH form above, with a remote health check appended:
+
+```bash
+sshpass -p '<TN2_PASSWORD>' ssh -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null root@43.160.238.86 \
+  'hostname && systemctl is-active vpn-provision || true'
+```
+
+If manual provisioning is required, import `amneziawg/ios-direct-template.conf`
+into the AmneziaWG app and generate a unique keypair per device:
+
 ```bash
 awg genkey | tee device.priv | awg pubkey > device.pub
 ```
@@ -352,6 +380,19 @@ PublicKey = <DEVICE_PUBLIC_KEY>
 AllowedIPs = 10.8.0.<N>/32
 ```
 Then reload: `awg syncconf awg0 <(awg-quick strip awg0)`
+
+#### Mobile split routing
+
+iOS showed unreliable handshakes with the honest full split list
+(`~198 KB`, `11975` routes). A reduced split list under `128 KB` connects
+reliably. Taobao product detail pages were still blocked until Alibaba/Taobao
+cloud and CDN prefixes were excluded from `AllowedIPs`, forcing that traffic
+direct. The current mobile recommendation is:
+
+- iOS/Android: use the reduced Taobao-direct split list.
+- macOS: keep the honest full split list; macOS does not have the same config
+  size limit.
+- IPv6: keep disabled in client `AllowedIPs` for the current environment.
 
 ### macOS (additional machines)
 
@@ -366,7 +407,9 @@ Use `amneziawg/mac-direct-template.conf`. Key difference from mobile: `AllowedIP
 | mac3 | 10.8.0.4 |
 | ios1 | 10.8.0.5 |
 | ios2 | 10.8.0.6 |
-| Next device | 10.8.0.7, 10.8.0.8, ... |
+| android1 | 10.8.0.7 |
+| android2 | 10.8.0.8 |
+| Next device | 10.8.0.9, 10.8.0.10, ... |
 
 ---
 

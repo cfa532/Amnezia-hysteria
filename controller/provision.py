@@ -154,23 +154,72 @@ def _split_allowed_ips() -> str:
     if not SPLIT_IPS_PATH.exists():
         raise HTTPException(status_code=500,
                             detail="split-allowed-ips.txt not found on server")
-    return SPLIT_IPS_PATH.read_text().strip()
+    return _normalize_allowed_ips(SPLIT_IPS_PATH.read_text())
+
+def _normalize_allowed_ips(raw: str) -> str:
+    tokens = []
+    for line in raw.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.lower().startswith("allowedips"):
+            if "=" not in line:
+                raise HTTPException(status_code=500,
+                                    detail="Invalid split AllowedIPs line: missing '='")
+            line = line.split("=", 1)[1].strip()
+        line = line.rstrip("\\").strip()
+        tokens.extend(part.strip() for part in line.replace(",", " ").split())
+
+    seen = set()
+    networks = []
+    for token in tokens:
+        try:
+            network = ipaddress.ip_network(token, strict=True)
+        except ValueError as e:
+            raise HTTPException(status_code=500,
+                                detail=f"Invalid split AllowedIPs entry '{token}': {e}")
+        canonical = str(network)
+        if canonical not in seen:
+            seen.add(canonical)
+            networks.append(canonical)
+
+    if not networks:
+        raise HTTPException(status_code=500,
+                            detail="split-allowed-ips.txt has no valid CIDR entries")
+    return ", ".join(networks)
+
+def _normalize_os_type(os_type: str) -> str:
+    normalized = os_type.strip().lower()
+    if normalized not in {"macos", "ios", "android"}:
+        raise HTTPException(status_code=422,
+                            detail="os_type must be one of: macos, ios, android")
+    return normalized
+
+def _normalize_routing(routing: str) -> str:
+    normalized = routing.strip().lower()
+    if normalized not in {"full", "split"}:
+        raise HTTPException(status_code=422,
+                            detail="routing must be one of: full, split")
+    return normalized
 
 AWG_DIRECT_ENDPOINT = "nebuchadnezzar.fireshare.uk:51820"
 AWG_HY2_ENDPOINT    = "127.0.0.1:1443"   # local Hysteria2 UDP forwarder (macOS only)
 
 def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
                    os_type: str, routing: str = "full") -> str:
+    os_type = _normalize_os_type(os_type)
+    routing = _normalize_routing(routing)
+
     if routing == "split":
         allowed = _split_allowed_ips()
-    elif os_type == "ios":
+    elif os_type in {"ios", "android"}:
         allowed = "0.0.0.0/0, ::/0"
     else:
         allowed = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"
 
-    # iOS has no local Hysteria2 daemon — connect directly to the server.
+    # Mobile clients have no local Hysteria2 daemon — connect directly.
     # macOS runs Hysteria2 locally and routes AWG traffic through it.
-    endpoint = AWG_DIRECT_ENDPOINT if os_type == "ios" else AWG_HY2_ENDPOINT
+    endpoint = AWG_DIRECT_ENDPOINT if os_type in {"ios", "android"} else AWG_HY2_ENDPOINT
 
     return (
         f"[Interface]\n"
@@ -233,6 +282,8 @@ def provision(req: ProvisionRequest,
     cfg    = load_config()
     state  = load_state()
     health = load_health()
+    os_type = _normalize_os_type(req.os_type)
+    routing = _normalize_routing(req.routing)
 
     # Revoke existing assignment — remove peer from every server
     if req.device_name in state["clients"]:
@@ -274,15 +325,15 @@ def provision(req: ProvisionRequest,
         "preferred_server": preferred["name"],
         "client_ip":        client_ip,
         "region":           req.region,
-        "os_type":          req.os_type,
-        "routing":          req.routing,
+        "os_type":          os_type,
+        "routing":          routing,
         "active":           True,
         "provisioned_at":   datetime.utcnow().isoformat(),
     }
     save_state(state)
 
     wg_config    = make_wg_config(req.device_privkey, client_ip,
-                                   shared_pubkey, req.os_type, req.routing)
+                                   shared_pubkey, os_type, routing)
     servers_conf = make_servers_conf(cfg["servers"])
 
     log.info(f"Provisioned {req.device_name} → preferred={preferred['name']}"
