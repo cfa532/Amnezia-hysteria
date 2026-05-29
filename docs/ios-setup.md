@@ -1,14 +1,14 @@
 # iOS Client Setup
 
 ```
-AmneziaWG app ──UDP──▶ nebuchadnezzar.fireshare.uk:51820
+AmneziaWG app ──UDP──▶ nebuchadnezzar.fireshare.uk:53
                                     │
                           VPN server (awg0, AmneziaWG)
                                     │
                                internet
 ```
 
-iOS connects directly to the server on UDP port 51820. There is no local Hysteria2 daemon — it is macOS-only.
+iOS connects directly to the server on UDP port 53. There is no local Hysteria2 daemon — it is macOS-only.
 
 ---
 
@@ -36,8 +36,8 @@ In the AmneziaWG app, tap the tunnel → check the Peer section:
 
 | Field | Expected value |
 |-------|---------------|
-| Endpoint | `nebuchadnezzar.fireshare.uk:51820` |
-| Public Key | `C2OkAsdX/YDxDg4iaRhFpUclQ0MFL0oRbk/oUuk3lgg=` |
+| Endpoint | `nebuchadnezzar.fireshare.uk:53` |
+| Public Key | `AQgL8TfJomzJTcNxq/2mhKzgZfOp7eLuFEnsH0PDQhc=` |
 | AllowedIPs | `0.0.0.0/0, ::/0` (full) or a long IP list (split) |
 
 If the endpoint shows `127.0.0.1:1443`, delete the tunnel and re-import — that is an old config.
@@ -52,7 +52,7 @@ Toggle the tunnel on in the AmneziaWG app.
 
 ## Verification
 
-Open Safari and go to `https://api.ipify.org`. The returned IP should be one of the Singapore servers, not your ISP's IP.
+Open Safari and go to `https://api.ipify.org`. The returned IP should be the Tokyo server IP (`43.165.128.251`), not your ISP's IP.
 
 ---
 
@@ -83,7 +83,7 @@ Contact the admin to switch modes — this is set at provisioning time.
 
 1. **Wrong app** — confirm you are using AmneziaWG, not WireGuard. The WireGuard app won't work.
 2. **Old config** — if the endpoint is `127.0.0.1:1443`, delete and re-import the current `iosN.conf`.
-3. **Port blocked** — UDP 51820 must be open in both the cloud security group (Alibaba/Tencent console) and the server's OS firewall. This is an admin task.
+3. **Port blocked** — UDP 53 must be open in the cloud security group (Alibaba/Tencent console). Port 53 (DNS) is chosen because it is rarely blocked by home routers or ISPs; if you still time out on Wi-Fi, try cellular to confirm the server is up.
 
 ### Connected but no internet
 
@@ -91,4 +91,4 @@ AllowedIPs `0.0.0.0/0` routes everything including DNS through the tunnel. If th
 
 ### Slow on cellular, fast on Wi-Fi
 
-Cellular UDP performance varies by carrier and location. Hysteria2 (used on macOS) is specifically tuned for lossy links; iOS uses raw UDP 51820. This is inherent — no client-side fix.
+Cellular UDP performance varies by carrier and location. Hysteria2 (used on macOS) is specifically tuned for lossy links; iOS uses raw AWG over UDP 53. This is inherent — no client-side fix.

@@ -12,6 +12,11 @@
         <string>/bin/bash</string>
         <string>/usr/local/bin/fix-hysteria-route.sh</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/REPLACE_WITH_USERNAME</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

@@ -13,14 +13,9 @@ Hysteria2 (QUIC/TLS transport) wraps AmneziaWG (obfuscated WireGuard VPN). The c
 Client
   └─ AmneziaWG (endpoint: 127.0.0.1:1443)
        └─ Hysteria2 (QUIC, masquerades as HTTPS)
-              ├─ a1:80  →  awg0:51820
-              └─ tn2:80 →  awg0:51820
+              └─ tn1:443  →  awg0:53
                    │
-              Regional Controller (on tn2)
-                   ├── Health checks all servers every 30s via SSH
-                   ├── Tracks active_peers per server
-                   ├── Updates Cloudflare DNS (healthy servers only)
-                   └── Provisioning API: least-loaded server in region
+              nebuchadnezzar.fireshare.uk (Cloudflare DNS, TTL 60s)
 ```
 
 ---
@@ -29,15 +24,45 @@ Client
 
 | Component | Host | Details |
 |-----------|------|---------|
-| Health controller | tn2 | `vpn-controller.service`, `/opt/vpn-controller/health.py` |
-| Provisioning API | tn2 | `vpn-provision.service`, binds `127.0.0.1:9000` |
-| DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s |
-| VPN + Hysteria2 a1 | 8.222.164.32 | region: asia, awg0 UDP 51820, hysteria2 UDP 80 |
-| VPN + Hysteria2 tn2 | 43.160.238.86 | region: asia, awg0 UDP 51820, hysteria2 UDP 80 |
+| DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, single A record |
+| VPN + Hysteria2 tn1 | 43.165.128.251 | region: tokyo, awg0 UDP 53, hysteria2 UDP 443 |
 
-State file: `/etc/vpn-controller/clients.json`
-API token: `/etc/vpn-controller/api.token`
-Config: `/etc/vpn-controller/controller.yaml`
+Decommissioned: a1 (8.222.164.32, Singapore), tn2 (43.160.238.86, Singapore)
+
+---
+
+## Known Design Limitations
+
+### ⚠ iOS/Android routing loop when server IP falls inside AllowedIPs
+
+**Severity: High. Affects every mobile client whenever a new server is added.**
+
+iOS and Android cannot run a route fix daemon. This means the only mechanism available to prevent a routing loop is the AllowedIPs list itself — the server IP must not appear in any covered CIDR.
+
+**How the loop occurs:**
+
+Mobile clients use split-tunnel routing. AllowedIPs contains the full China IP list, which includes Alibaba Cloud and Tencent Cloud ranges (e.g., `43.160.0.0/12`). Any server provisioned on one of these providers (Tokyo, Singapore, HK nodes on Alibaba/Tencent) will likely land inside a covered block. When the client tries to reach the server to establish a handshake, the OS routes those packets into the not-yet-established tunnel — the handshake can never complete.
+
+**macOS is not affected** — the route fix LaunchDaemon adds a static host route for the server IP via the physical interface, taking precedence over AWG routes. This is not possible on iOS/Android.
+
+**Current workaround:** Split the covering CIDR into sub-CIDRs that collectively exclude the server's `/24`. For example, `43.160.0.0/12` was split into 12 CIDRs to exclude `43.165.128.0/24` (tn1's block). This works but has a serious operational cost:
+
+- Every new server added in an Alibaba/Tencent IP range requires a new CIDR split.
+- Updated conf files must be redistributed to every mobile user (new QR code scan).
+- The AllowedIPs line grows with each exclusion, making conf files increasingly fragile.
+- If a server IP changes within the same /24 the exclusion still holds; if it moves to a new /24 within a covered block, the split must be redone.
+
+**Structural root cause:** AllowedIPs is static and baked into the client conf at provisioning time. There is no mechanism on iOS/Android to dynamically exclude new server IPs at runtime.
+
+**Recommended mitigations (in order of preference):**
+
+1. **Choose server IPs outside the AllowedIPs coverage** — Prefer cloud providers whose IP allocations are not in the China routing list. AWS Tokyo (`13.x`, `52.x`, `54.x`), Vultr, Linode (`139.x`), Hetzner are typically safe. Avoid Alibaba Cloud and Tencent Cloud if the resulting IP will land in a covered block. Verify before deploying: check the candidate IP against the AllowedIPs list.
+
+2. **Add a stable relay node with a guaranteed-safe IP** — One cheap VPS (US/EU IP, provably outside AllowedIPs) acts as the permanent iOS/Android endpoint. iOS clients always connect to the relay; the relay forwards to the actual backend. Backend IPs can change freely without touching any client conf. Adds ~20–50 ms latency but eliminates the redistribution problem entirely.
+
+3. **Accept redistribution on server changes** — Keep the current split approach. Treat server IP changes as a client migration event that requires a QR code redistribution to all mobile users. Acceptable only if server changes are rare (< once a year) and the user base is small.
+
+**When adding any new server:** Before deploying, run the candidate IP against the AllowedIPs list. If it falls inside a covered CIDR, either reject the IP and request a different one from the provider, or execute a CIDR split and plan for a full mobile conf redistribution.
 
 ---
 
@@ -84,8 +109,8 @@ Each server has one of three states:
 ### 1. Backend VPN Servers
 
 Each server runs:
-- `awg-quick@awg0` on UDP 51820 (internal — reachable only via Hysteria2)
-- `hysteria.service` on UDP 80 (public — QUIC, TLS, masquerades as HTTPS)
+- `awg-quick@awg0` on UDP 53 (public for iOS/Android direct; internal for macOS via Hysteria2 loopback)
+- `hysteria.service` on UDP 443 (public — QUIC, TLS, masquerades as HTTPS)
 
 All servers share the same AWG private key and peer list.
 

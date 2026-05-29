@@ -61,7 +61,7 @@ Hysteria2 also uses a **masquerade** feature: unauthenticated HTTPS requests rec
 
 ### Why UDP 443?
 
-UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUIC). Hysteria2 and AmneziaWG's original port 443 conflict is resolved by moving AmneziaWG to UDP 51820 on the server side; the client side only ever sees `127.0.0.1`.
+UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUIC). Hysteria2 and AmneziaWG's original port 443 conflict is resolved by moving AmneziaWG to UDP 53 on the server side; the client side only ever sees `127.0.0.1`.
 
 ### Why split-tunnel (not full-tunnel)?
 
@@ -110,7 +110,7 @@ Each client picks a random starting server on first run. This distributes steady
   │                     │     │                       │
   │  Hysteria2 :443/UDP │     │  Hysteria2 :443/UDP   │
   │       │             │     │       │               │
-  │  AmneziaWG :51820   │     │  AmneziaWG :51820     │
+  │  AmneziaWG :53   │     │  AmneziaWG :53     │
   │       │             │     │       │               │
   │  NAT → internet     │     │  NAT → internet       │
   └─────────────────────┘     └─────────────────────┘
@@ -148,7 +148,7 @@ apt install amneziawg
 ```ini
 [Interface]
 Address = 10.8.0.1/24
-ListenPort = 51820
+ListenPort = 53
 PrivateKey = <SERVER_PRIVATE_KEY>
 
 Jc = 4

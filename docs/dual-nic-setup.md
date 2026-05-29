@@ -44,7 +44,7 @@ AmneziaWG app ──UDP──▶ 127.0.0.1:1443 (Hysteria2 UDP forwarder)
                               │
                     127.0.0.1:9443 (hysteria-udp-proxy.py)
                               │  ← outgoing socket bound to en1 IP
-                    UDP :80 via WiFi (en1)
+                    UDP :53 via WiFi (en1)
                               │
                     VPN server — nebuchadnezzar.fireshare.uk
 ```
@@ -154,7 +154,7 @@ transport:
 
 udpForwarding:
   - listen: 127.0.0.1:1443
-    remote: 127.0.0.1:51820
+    remote: 127.0.0.1:53
     timeout: 0s
 EOF
 ```
