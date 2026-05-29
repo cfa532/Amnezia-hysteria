@@ -8,7 +8,7 @@ Sets up the VPN client on a regular macOS machine. "Regular" means a single acti
 ```
 AmneziaWG app ──UDP──▶ 127.0.0.1:1443 (Hysteria2 UDP forwarder)
                               │
-                    Hysteria2 client (QUIC over UDP :53)
+                    Hysteria2 client (QUIC over UDP :443)
                               │
                     VPN server — nebuchadnezzar.fireshare.uk
                               │
@@ -46,7 +46,7 @@ The tunnel config has `Endpoint = 127.0.0.1:1443`. This is intentional — it po
 
 ## Step 2 — Hysteria2
 
-Hysteria2 runs as a background daemon. It connects to the VPN server over QUIC (UDP port 53) and exposes `127.0.0.1:1443`, which AmneziaWG uses as its endpoint.
+Hysteria2 runs as a background daemon. It connects to the VPN server over QUIC (UDP port 443) and exposes `127.0.0.1:1443`, which AmneziaWG uses as its endpoint.
 
 ### 2.1 Install the binary
 
@@ -104,7 +104,7 @@ transport:
 
 udpForwarding:
   - listen: 127.0.0.1:1443
-    remote: 127.0.0.1:53
+    remote: 127.0.0.1:443
     timeout: 0s
 EOF
 ```

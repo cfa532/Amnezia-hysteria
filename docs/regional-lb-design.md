@@ -13,7 +13,7 @@ Hysteria2 (QUIC/TLS transport) wraps AmneziaWG (obfuscated WireGuard VPN). The c
 Client
   └─ AmneziaWG (endpoint: 127.0.0.1:1443)
        └─ Hysteria2 (QUIC, masquerades as HTTPS)
-              └─ tn1:443  →  awg0:53
+              └─ tn1:8443  →  awg0:443
                    │
               nebuchadnezzar.fireshare.uk (Cloudflare DNS, TTL 60s)
 ```
@@ -25,7 +25,7 @@ Client
 | Component | Host | Details |
 |-----------|------|---------|
 | DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, single A record |
-| VPN + Hysteria2 tn1 | 43.165.128.251 | region: tokyo, awg0 UDP 53, hysteria2 UDP 443 |
+| VPN + Hysteria2 tn1 | 43.165.128.251 | region: tokyo, awg0 UDP 443, hysteria2 UDP 8443 |
 
 Decommissioned: a1 (8.222.164.32, Singapore), tn2 (43.160.238.86, Singapore)
 
@@ -109,8 +109,8 @@ Each server has one of three states:
 ### 1. Backend VPN Servers
 
 Each server runs:
-- `awg-quick@awg0` on UDP 53 (public for iOS/Android direct; internal for macOS via Hysteria2 loopback)
-- `hysteria.service` on UDP 443 (public — QUIC, TLS, masquerades as HTTPS)
+- `awg-quick@awg0` on UDP 443 (public for iOS/Android direct; internal for macOS via Hysteria2 loopback)
+- `hysteria.service` on UDP 8443 (public — QUIC, TLS, masquerades as HTTPS)
 
 All servers share the same AWG private key and peer list.
 

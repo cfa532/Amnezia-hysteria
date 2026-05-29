@@ -1,14 +1,14 @@
 # iOS Client Setup
 
 ```
-AmneziaWG app ──UDP──▶ nebuchadnezzar.fireshare.uk:53
+AmneziaWG app ──UDP──▶ nebuchadnezzar.fireshare.uk:443
                                     │
                           VPN server (awg0, AmneziaWG)
                                     │
                                internet
 ```
 
-iOS connects directly to the server on UDP port 53. There is no local Hysteria2 daemon — it is macOS-only.
+iOS connects directly to the server on UDP port 443. There is no local Hysteria2 daemon — it is macOS-only.
 
 ---
 
@@ -36,7 +36,7 @@ In the AmneziaWG app, tap the tunnel → check the Peer section:
 
 | Field | Expected value |
 |-------|---------------|
-| Endpoint | `nebuchadnezzar.fireshare.uk:53` |
+| Endpoint | `nebuchadnezzar.fireshare.uk:443` |
 | Public Key | `AQgL8TfJomzJTcNxq/2mhKzgZfOp7eLuFEnsH0PDQhc=` |
 | AllowedIPs | `0.0.0.0/0, ::/0` (full) or a long IP list (split) |
 

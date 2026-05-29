@@ -15,5 +15,5 @@ transport:
 
 udpForwarding:
   - listen: 127.0.0.1:1443  # AmneziaWG connects here
-    remote: 127.0.0.1:53   # AmneziaWG server port (relative to server)
+    remote: 127.0.0.1:443   # AmneziaWG server port (relative to server)
     timeout: 0s

@@ -35,7 +35,7 @@ Two transport modes are supported depending on the client type:
   AmneziaWG (utun, obfuscated WireGuard)
     ↓ UDP to 127.0.0.1:1443 (Sequoia) or 127.0.0.1:1444 (Tahoe)
   Hysteria2 client (QUIC/UDP)
-    ↓ QUIC over UDP port 443 → ISP → internet
+    ↓ QUIC over UDP port 8443 → ISP → internet
   Hysteria2 server (<YOUR_DOMAIN>:443)
     ↓ UDP forwarded to 127.0.0.1:53
   AmneziaWG server (awg0, port 53)
@@ -82,23 +82,16 @@ Mode B is used for mobile devices because Hysteria2 apps are unavailable in the 
 
 | Service | Port | Config | Notes |
 |---------|------|--------|-------|
-| `awg-quick@awg0` | UDP/53 | `/etc/amnezia/amneziawg/awg0.conf` | iOS/Android direct + macOS via Hysteria2 loopback |
-| `hysteria` | UDP/443 | `/etc/hysteria/server.yaml` | Hysteria2 QUIC transport for macOS clients |
+| `awg-quick@awg0` | UDP/443 | `/etc/amnezia/amneziawg/awg0.conf` | iOS/Android direct + macOS via Hysteria2 loopback |
+| `hysteria` | UDP/8443 | `/etc/hysteria/server.yaml` | Hysteria2 QUIC transport for macOS clients |
 
-> **Note:** AWG uses port 53 (DNS) because UDP 80 is blocked by many home routers. Port 53 is open on virtually all networks. Before AWG can bind to port 53, systemd-resolve's stub listener must be disabled — see server setup step below.
+> **Note:** AWG uses port 443 (HTTPS/QUIC) because it is universally open and never intercepted by home routers. Port 80 was blocked outbound; port 53 was intercepted by DNS hijacking on home routers and Android devices.
 
 #### AmneziaWG Server (awg0)
 
 - Config: `/etc/amnezia/amneziawg/awg0.conf`  (see `server/awg0-server.conf` template)
-- Listen port: **UDP 53** — chosen for universal firewall traversal (DNS port)
+- Listen port: **UDP 443** — chosen for universal traversal; same port as HTTPS so routers never block or intercept it
 - Subnet: `10.8.0.0/24`, Server IP: `10.8.0.1`
-
-**Prerequisite — free port 53 from systemd-resolve:**
-```bash
-echo 'DNSStubListener=no' >> /etc/systemd/resolved.conf
-systemctl restart systemd-resolved
-# Verify: ss -unlp | grep ':53' should show nothing on 0.0.0.0
-```
 - Same private key on all servers — identical pubkey presented to every client
 
 **Critical iptables setup** — UFW runs before appended rules; FORWARD rules must be inserted at position 1:
@@ -120,7 +113,7 @@ ip link set wg0 down
 - Service: `systemctl status hysteria-4443`
 - Template: `server/hysteria-server.yaml`
 
-The original hysteria.service (port 443) is removed — awg0 owns port 443.
+Hysteria2 runs on UDP 8443. AWG owns port 443.
 
 ---
 
@@ -156,11 +149,11 @@ transport:
 
 udpForwarding:
   - listen: 127.0.0.1:1443
-    remote: 127.0.0.1:53
+    remote: 127.0.0.1:443
     timeout: 0s
 ```
 
-Hysteria2 listens on `127.0.0.1:1443` and forwards all UDP to the server's AmneziaWG port (53 on 127.0.0.1 relative to the server).
+Hysteria2 listens on `127.0.0.1:1443` and forwards all UDP to the server's AmneziaWG port (443 on 127.0.0.1 relative to the server).
 
 ### AmneziaWG Client
 
@@ -273,7 +266,7 @@ tls:
 
 udpForwarding:
   - listen: 127.0.0.1:1444
-    remote: 127.0.0.1:53
+    remote: 127.0.0.1:443
     timeout: 0s
 ```
 
@@ -312,7 +305,7 @@ Same spurious host route problem as Sequoia. **Fixed and persistent.**
 TCP to <SERVER_1_IP> throttled to ~26 KB/s. Confirmed by 12+ minute SCP of 20 MB file. QUIC (UDP) is unthrottled — Hysteria2 solves this.
 
 ### 2. AmneziaWG Port Conflict
-AmneziaWG server was on UDP 443, conflicting with Hysteria2. Moved AmneziaWG to UDP 53 via `awg set wg0 listen-port 53`.
+Port history: AWG started on 443 (conflicted with Hysteria2), moved to 80 (blocked by home routers), then 53 (intercepted by home router DNS hijacking and Android OS), finally settled on 443 with Hysteria2 moved to 8443.
 
 ### 3. Spurious VPN Host Route (macOS Bug)
 macOS clones a host route for IPs adjacent to VPN subnet boundaries, even if those IPs are excluded from AllowedIPs. Adding a static host route via the physical gateway overrides this.

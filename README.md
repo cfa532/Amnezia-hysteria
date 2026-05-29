@@ -61,7 +61,7 @@ Hysteria2 also uses a **masquerade** feature: unauthenticated HTTPS requests rec
 
 ### Why UDP 443?
 
-UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUIC). Hysteria2 and AmneziaWG's original port 443 conflict is resolved by moving AmneziaWG to UDP 53 on the server side; the client side only ever sees `127.0.0.1`.
+UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUIC). Hysteria2 and AmneziaWG's original port 443 conflict is resolved by moving AmneziaWG to UDP 443 on the server side; the client side only ever sees `127.0.0.1`.
 
 ### Why split-tunnel (not full-tunnel)?
 
@@ -100,7 +100,7 @@ Each client picks a random starting server on first run. This distributes steady
        │ UDP → 127.0.0.1:1443 (device1) or :1444 (device2)
        ▼
   Hysteria2 client
-  QUIC/UDP over port 443
+  QUIC/UDP over port 8443
        │
        │  (direct via WiFi en1, bypassing soft router)
        ▼
@@ -110,7 +110,7 @@ Each client picks a random starting server on first run. This distributes steady
   │                     │     │                       │
   │  Hysteria2 :443/UDP │     │  Hysteria2 :443/UDP   │
   │       │             │     │       │               │
-  │  AmneziaWG :53   │     │  AmneziaWG :53     │
+  │  AmneziaWG :443   │     │  AmneziaWG :443     │
   │       │             │     │       │               │
   │  NAT → internet     │     │  NAT → internet       │
   └─────────────────────┘     └─────────────────────┘
