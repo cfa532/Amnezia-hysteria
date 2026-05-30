@@ -91,7 +91,7 @@ Mode B is used for mobile devices because Hysteria2 apps are unavailable in the 
 
 - Config: `/etc/amnezia/amneziawg/awg0.conf`  (see `server/awg0-server.conf` template)
 - Listen port: **UDP 443** — chosen for universal traversal; same port as HTTPS so routers never block or intercept it
-- Subnet: `10.8.0.0/24`, Server IP: `10.8.0.1`
+- Subnet: `10.8.1.0/24`, Server IP: `10.8.1.1` (tn1 clients; minipc owns `10.8.0.0/24`)
 - Same private key on all servers — identical pubkey presented to every client
 
 **Critical iptables setup** — UFW runs before appended rules; FORWARD rules must be inserted at position 1:
@@ -377,7 +377,7 @@ Add the peer to `/etc/amnezia/amneziawg/awg0.conf` on **all servers** (same peer
 [Peer]
 # <device-name>
 PublicKey = <DEVICE_PUBLIC_KEY>
-AllowedIPs = 10.8.0.<N>/32
+AllowedIPs = 10.8.1.<N>/32
 ```
 Then reload: `awg syncconf awg0 <(awg-quick strip awg0)`
 
@@ -402,14 +402,18 @@ Use `amneziawg/mac-direct-template.conf`. Key difference from mobile: `AllowedIP
 
 | Device | VPN IP |
 |--------|--------|
-| mac1 | 10.8.0.2 |
-| mac2 | 10.8.0.3 |
-| mac3 | 10.8.0.4 |
-| ios1 | 10.8.0.5 |
-| ios2 | 10.8.0.6 |
-| android1 | 10.8.0.7 |
-| android2 | 10.8.0.8 |
-| Next device | 10.8.0.9, 10.8.0.10, ... |
+| mac1 | 10.8.1.2 |
+| mac2 | 10.8.1.3 |
+| mac3 | 10.8.1.4 |
+| ios1 | 10.8.1.11 |
+| ios2 | 10.8.1.12 |
+| ios3 | 10.8.1.13 |
+| android1 | 10.8.1.14 |
+| android2 | 10.8.1.15 |
+| android3 | 10.8.1.16 |
+| Next device | 10.8.1.17, 10.8.1.18, ... |
+
+**Subnet layout:** tn1 clients use `10.8.1.0/24` (server interface `10.8.1.1`). `10.8.0.0/24` is reserved for minipc (Taiwan) users managed by a separate platform.
 
 ---
 

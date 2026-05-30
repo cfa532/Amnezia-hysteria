@@ -76,13 +76,15 @@ Without this, clients are permanently bound to one server's keypair and failover
 
 ### Global client IP pool
 
-All clients draw IPs from one subnet (`10.8.0.0/24`) regardless of which server they connect through. Server awg0 interfaces use a reserved block (`10.8.255.x`). This means a client's IP is stable across failover events.
+Clients draw IPs from per-network subnets. Server awg0 interfaces use `.1` of their respective subnet.
 
 | Block | Purpose |
 |-------|---------|
-| 10.8.0.0/24 | Client IPs (global pool) |
-| 10.8.255.1 | a1 awg0 interface |
-| 10.8.255.2 | tn2 awg0 interface |
+| 10.8.0.0/24 | minipc (Taiwan) clients — managed by external platform |
+| 10.8.1.0/24 | tn1 (Tokyo) clients — assigned at provisioning |
+| 10.8.1.1 | tn1 awg0 interface |
+
+**Why two subnets:** minipc owns `10.8.0.0/24`; tn1 clients were moved to `10.8.1.0/24` to avoid IP conflicts. Since both servers share the same AWG keypair, tn1 clients are registered as peers on minipc (10.8.1.x/32 AllowedIPs), enabling one-way failover: tn1 clients can connect to minipc, but minipc clients cannot connect to tn1.
 
 ### Peer registration on all servers
 
@@ -141,7 +143,7 @@ Authorization: Bearer <token>
   "device_name": "mac1",
   "server_name": "tn2",
   "server_pubkey": "<shared-awg-pubkey>",
-  "client_ip": "10.8.0.3",
+  "client_ip": "10.8.1.3",
   "wg_config": "<complete .conf file contents>",
   "servers_conf": "<hysteria2 servers.conf contents>"
 }
@@ -154,7 +156,7 @@ Provisioning steps:
 4. Find candidates: servers in region where `is_healthy AND is_available`
 5. If no candidates: raise 503 "region at capacity"
 6. Pick least-loaded: `min(candidates, key=lambda s: s.active_peers)`
-7. Allocate unused IP from global client pool (`10.8.0.0/24`)
+7. Allocate unused IP from region client pool (`10.8.1.0/24` for tokyo/tn1)
 8. Push peer to **all** servers via `awg set awg0 peer ... allowed-ips .../32`
 9. Persist with `awg-quick save awg0` on each server
 10. Return complete tunnel config + `servers_conf` with preferred server first
@@ -188,7 +190,7 @@ servers:
 awg:
   shared_privkey: <shared-awg-private-key>
   shared_pubkey: <shared-awg-public-key>
-  client_subnet: 10.8.0.0/24
+  client_subnet: 10.8.1.0/24   # tn1 clients; 10.8.0.0/24 is minipc
   server_base_ip: 10.8.255.0
 ```
 
@@ -200,7 +202,7 @@ Each client has two configs:
 ```ini
 [Interface]
 PrivateKey = <client-private-key>
-Address = 10.8.0.3/32
+Address = 10.8.1.3/32
 DNS = 8.8.8.8, 1.1.1.1
 MTU = 1280
 Jc = 4
@@ -273,7 +275,7 @@ No client config changes. No code changes. Existing clients gain the new server 
 - [x] `server/awg0-server.conf` — server awg0 config template
 - [x] `docs/macos-client-setup.md` — end-user import guide
 - [ ] Shared AWG keypair deployed to all servers
-- [ ] Global client IP pool (`10.8.0.0/24`) replacing per-server subnets
+- [x] Client IP pools: `10.8.1.0/24` (tn1/tokyo), `10.8.0.0/24` reserved for minipc
 - [ ] `active_peers` tracking in health controller
 - [ ] `max_peers` + `is_available` state in health controller
 - [ ] Provisioning pushes peers to all servers
