@@ -14,8 +14,8 @@ log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 # ── 1. Install Python deps ────────────────────────────────────────────────────
 log "Installing deps..."
-apt-get install -y python3-yaml python3-pip -q
-pip3 install fastapi uvicorn requests --break-system-packages -q
+apt-get install -y python3-yaml python3-pip sshpass -q
+pip3 install fastapi uvicorn requests pyyaml --break-system-packages -q
 
 # ── 2. Generate per-server keypairs ──────────────────────────────────────────
 log "Generating server keypairs..."
