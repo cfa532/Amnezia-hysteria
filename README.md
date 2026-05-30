@@ -59,6 +59,8 @@ Hysteria2 uses **QUIC** (UDP/443), which is not subject to this throttling on th
 
 Hysteria2 also uses a **masquerade** feature: unauthenticated HTTPS requests receive a valid proxy response (Bing homepage), making the server indistinguishable from a real HTTPS server to passive observers.
 
+> **Caveat — Hysteria2 is not always the win.** Hysteria2's UDP forwarding carries each tunnelled packet as a QUIC *datagram*, which is **not retransmitted** on loss. On a path that already has meaningful packet loss (e.g. the cross-strait gen8 → minipc China↔Taiwan link, ~15% loss), the QUIC-datagram round trip compounds loss to ~47% and TCP becomes unusable — *worse* than running AmneziaWG directly over the same path. Hysteria2 helps when the bottleneck is TCP throttling on a clean-ish path; it hurts when the bottleneck is raw packet loss or UDP-port throttling. The gen8 soft router was therefore kept on **direct AWG**, not Hysteria2 — see [docs/gen8-setup.md](docs/gen8-setup.md#lesson-hysteria2-is-worse-than-direct-awg-for-cross-strait-traffic). Always measure tunnel-path vs direct-path loss before committing to Hysteria2 on a new link.
+
 ### Why UDP 443?
 
 UDP 4443 is blocked by many networks. Port 443 is universally allowed (HTTPS/QUIC). Hysteria2 and AmneziaWG's original port 443 conflict is resolved by moving AmneziaWG to UDP 443 on the server side; the client side only ever sees `127.0.0.1`.
