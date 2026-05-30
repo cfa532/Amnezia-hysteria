@@ -196,6 +196,16 @@ launchctl kickstart -k gui/$(id -u)/uk.fireshare.hysteria
 
 ---
 
+## Split routing
+
+Tahoe's `mac2.conf` has `AllowedIPs` set to the full non-China CIDR list: Chinese IP ranges route direct; all other traffic goes through the VPN.
+
+The route-fix daemon (`fix-hysteria-route.sh`) reads `servers.conf` at runtime and installs `/32` host routes for every server IP via en1. Server IPs do not need to be excluded from `AllowedIPs` — the `/32` routes take precedence over any matching CIDR block.
+
+The current macOS AllowedIPs list is maintained at `/etc/vpn-controller/split-allowed-ips.txt` on tn1. See [regional-lb-design.md](regional-lb-design.md#split-allowedips) for the full update procedure.
+
+---
+
 ## Verification
 
 ```bash

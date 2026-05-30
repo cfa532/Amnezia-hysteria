@@ -4,7 +4,7 @@
 # Usage: reprovision.sh <device_name> [os_type] [routing] [output_dir]
 #   device_name: mac1, mac2, ios1, etc.
 #   os_type:     macos | ios | android  (default: macos)
-#   routing:     full | split            (default: full)
+#   routing:     full | split            (default: split)
 #   output_dir:  where to write output files  (default: ~/Documents/Gen8)
 #
 # macOS output: <device_name>.conf  (AWG config)
@@ -20,7 +20,7 @@ set -euo pipefail
 
 DEVICE_NAME=${1:?Usage: reprovision.sh <device_name> [os_type] [routing] [output_dir]}
 OS_TYPE=${2:-macos}
-ROUTING=${3:-full}
+ROUTING=${3:-split}
 OUTPUT_DIR=${4:-~/Documents/Gen8}
 REGION=${REGION:-asia}
 

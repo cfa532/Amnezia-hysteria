@@ -171,9 +171,13 @@ launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria-failover.plist
 
 ## Split routing
 
-Your provisioned `.conf` has `AllowedIPs` set to all non-Chinese IP ranges. Chinese sites route direct via your ISP; everything else goes through the VPN.
+Your provisioned `.conf` has `AllowedIPs` set to the full non-China CIDR list. Chinese IP ranges route direct via your ISP; everything else goes through the VPN.
 
-If provisioned with `routing=full`, `AllowedIPs = 0.0.0.0/0, ::/0` and all traffic goes through the VPN. Contact the admin to switch.
+The route-fix daemon (`fix-hysteria-route.sh`) reads `servers.conf` at runtime and installs `/32` host routes for every server IP via the physical interface. Server IPs do not need to be excluded from `AllowedIPs` — the `/32` routes take precedence over any matching CIDR block, preventing the Hysteria2 routing loop on macOS.
+
+The macOS CIDR list is the full uncompressed version maintained at `/etc/vpn-controller/split-allowed-ips.txt` on tn1. iOS/Android use a version with additional per-server CIDR splits (see [regional-lb-design.md](regional-lb-design.md#split-allowedips)).
+
+If provisioned with `routing=full`, all traffic goes through the VPN. Contact the admin to reprovision with `routing=split`.
 
 ---
 

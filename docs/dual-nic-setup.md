@@ -226,6 +226,20 @@ launchctl kickstart -k gui/$(id -u)/uk.fireshare.hysteria
 
 ---
 
+## Split routing
+
+Your provisioned `macN.conf` has `AllowedIPs` set to the full non-China CIDR list: Chinese IP ranges route direct via the ISP; all other traffic goes through the VPN.
+
+The route-fix daemon (`fix-hysteria-route.sh`) reads `servers.conf` at runtime and installs `/32` host routes for every server IP via en1. This means server IPs do not need to be excluded from `AllowedIPs` — the `/32` routes take precedence over any matching CIDR block. If the server list changes, the daemon picks up the new IPs on next restart.
+
+The current macOS AllowedIPs list is maintained at `/etc/vpn-controller/split-allowed-ips.txt` on tn1. To update after a China routing table change:
+1. Update `split-allowed-ips.txt` on tn1
+2. Pull the updated list into your `macN.conf` and re-import in the AmneziaWG app
+
+If provisioned with `routing=full`, `AllowedIPs = 0.0.0.0/0, ::/0` and all traffic goes through the VPN. Contact the admin to switch to split routing.
+
+---
+
 ## Verification
 
 ```bash
