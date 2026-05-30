@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import socket, threading, os, subprocess, time
+import socket, threading, os, subprocess, time, random
 
 LOCAL_HOST = '127.0.0.1'
 LOCAL_PORT = int(os.environ.get('HYSTERIA_PROXY_PORT', '9443'))
@@ -38,7 +38,11 @@ def get_current_server():
     try:
         idx = int(open(STATE_FILE).read().strip()) % len(servers)
     except Exception:
-        idx = 0
+        idx = random.randrange(len(servers))
+        try:
+            open(STATE_FILE, 'w').write(str(idx))
+        except Exception:
+            pass
     return servers[idx]
 
 def remote_reader(remote_sock, local_sock, client_addr, sessions):
