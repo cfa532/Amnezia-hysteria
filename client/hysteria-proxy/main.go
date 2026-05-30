@@ -18,6 +18,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"sync/atomic"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -158,6 +159,27 @@ type proxy struct {
 
 	mu   sync.RWMutex
 	sess map[string]*session
+
+	txBytes atomic.Int64 // local → remote
+	rxBytes atomic.Int64 // remote → local
+	txPkts  atomic.Int64
+	rxPkts  atomic.Int64
+}
+
+func (p *proxy) logStats() {
+	prev_tx, prev_rx := int64(0), int64(0)
+	for range time.Tick(5 * time.Second) {
+		tx := p.txBytes.Load()
+		rx := p.rxBytes.Load()
+		pkts_tx := p.txPkts.Load()
+		pkts_rx := p.rxPkts.Load()
+		log.Printf("stats: tx=%.1f KB/s (%d pkts) rx=%.1f KB/s (%d pkts)",
+			float64(tx-prev_tx)/5/1024, pkts_tx,
+			float64(rx-prev_rx)/5/1024, pkts_rx)
+		prev_tx, prev_rx = tx, rx
+		p.txPkts.Store(0)
+		p.rxPkts.Store(0)
+	}
 }
 
 // getOrCreate returns the session for clientAddr, creating one if needed.
@@ -227,6 +249,8 @@ func (p *proxy) readRemote(s *session, clientAddr *net.UDPAddr) {
 		if _, err := p.local.WriteToUDP(buf[:n], clientAddr); err != nil {
 			return
 		}
+		p.rxBytes.Add(int64(n))
+		p.rxPkts.Add(1)
 	}
 }
 
@@ -253,6 +277,9 @@ func (p *proxy) run() {
 				delete(p.sess, clientAddr.String())
 			}
 			p.mu.Unlock()
+		} else {
+			p.txBytes.Add(int64(n))
+			p.txPkts.Add(1)
 		}
 	}
 }
@@ -290,5 +317,6 @@ func main() {
 		startIP: startIP,
 		sess:    make(map[string]*session),
 	}
+	go p.logStats()
 	p.run()
 }
