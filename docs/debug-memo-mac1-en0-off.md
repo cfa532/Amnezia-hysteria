@@ -1,5 +1,7 @@
 # Debug Memo: mac1 (Sequoia) fails to activate AWG tunnel when en0 is off
 
+> **Note:** Server IPs in this memo (8.222.164.32 a1-singa, 43.160.238.86 tn2) are decommissioned as of 2026-05-30. Current servers: tn1 (43.165.128.251), minipc (125.229.161.122).
+
 **Date:** 2026-05-25  
 **Debugger:** cfa533 @ Tahoe (192.168.5.6) — SSH into mac1 at 192.168.5.8 (user: cfa532)
 

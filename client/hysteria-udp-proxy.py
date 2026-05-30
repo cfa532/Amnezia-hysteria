@@ -34,7 +34,7 @@ def get_current_server():
     except Exception:
         pass
     if not servers:
-        return ('8.222.164.32', 80)
+        raise RuntimeError(f"No servers found in {SERVERS_CONF} — cannot start proxy")
     try:
         idx = int(open(STATE_FILE).read().strip()) % len(servers)
     except Exception:

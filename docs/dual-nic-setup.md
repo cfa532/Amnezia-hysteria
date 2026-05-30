@@ -179,8 +179,8 @@ sudo launchctl bootstrap system \
 
 Verify:
 ```bash
-route get 8.222.164.32    # interface must be en1, NOT utunX
-route get 43.160.238.86
+route get 43.165.128.251    # interface must be en1, NOT utunX
+route get 125.229.161.122
 ```
 
 ---
@@ -277,14 +277,15 @@ tail -10 /tmp/hysteria-proxy.log
 The route-fix daemon may not be running or the routes are stale:
 ```bash
 sudo launchctl list uk.fireshare.hysteria-route
-route get 8.222.164.32   # must NOT show utunX
+route get 43.165.128.251   # must NOT show utunX
 ```
 
 ### Hysteria2 connects but no data flows through AWG
 
 Check that your device has a recent handshake on the server:
 ```bash
-ssh root@8.222.164.32 "awg show awg0"
+# SSH to whichever server your proxy selected (check /tmp/hysteria-server-index)
+sshpass -p '<password>' ssh root@43.165.128.251 "awg show awg0"
 # Look for your device's allowed IP — last handshake should be within the last few minutes
 ```
 

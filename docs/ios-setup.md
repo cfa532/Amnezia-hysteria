@@ -52,7 +52,7 @@ Toggle the tunnel on in the AmneziaWG app.
 
 ## Verification
 
-Open Safari and go to `https://api.ipify.org`. The returned IP should be the Tokyo server IP (`43.165.128.251`), not your ISP's IP.
+Open Safari and go to `https://api.ipify.org`. The returned IP should be a VPN server IP (tn1 or minipc), not your ISP's IP.
 
 ---
 

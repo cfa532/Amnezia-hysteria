@@ -129,7 +129,10 @@ log "=== hysteria log ==="
 tail -3 /tmp/hysteria-mac.log
 
 log "=== routes ==="
-/sbin/route get 8.222.164.32  | grep -E 'interface|gateway'
-/sbin/route get 43.160.238.86 | grep -E 'interface|gateway'
+while IFS= read -r line; do
+    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+    server_ip=$(awk '{print $1}' <<< "$line")
+    /sbin/route get "$server_ip" | grep -E 'interface|gateway' | sed "s/^/  $server_ip: /"
+done < "$APPSUPP/servers.conf"
 
 log "Done. Toggle the AWG tunnel in AmneziaWG and verify a handshake."

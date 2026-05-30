@@ -1,5 +1,7 @@
 # Morphous VPN — Setup Documentation
 
+> **Note:** This doc covers the original a1/tn2 setup (decommissioned 2026-05-30). Current servers are tn1 (43.165.128.251, Tokyo) and minipc (125.229.161.122, Taiwan). See `regional-lb-design.md` for the current architecture.
+
 **Date:** 2026-05-23  
 **Author:** user  
 
