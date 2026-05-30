@@ -63,6 +63,8 @@ class ServerState:
     max_peers: int
     ssh_key: str = ""
     ssh_pass: str = ""
+    ssh_user: str = "root"
+    ssh_port: int = 22
     healthy: bool = True
     available: bool = True      # healthy AND active_peers < max_peers
     active_peers: int = 0
@@ -74,12 +76,13 @@ class ServerState:
 # ── SSH helpers ────────────────────────────────────────────────────────────────
 
 def _ssh_args(server: ServerState) -> list[str]:
-    base = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
+    base = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
+            "-p", str(server.ssh_port)]
+    target = f"{server.ssh_user}@{server.ip}"
     if server.ssh_key:
-        return ["ssh", "-i", server.ssh_key] + base + ["-o", "BatchMode=yes",
-                f"root@{server.ip}"]
+        return ["ssh", "-i", server.ssh_key] + base + ["-o", "BatchMode=yes", target]
     elif server.ssh_pass:
-        return ["sshpass", "-p", server.ssh_pass, "ssh"] + base + [f"root@{server.ip}"]
+        return ["sshpass", "-p", server.ssh_pass, "ssh"] + base + [target]
     raise RuntimeError(f"No SSH credentials for {server.name}")
 
 
@@ -207,6 +210,8 @@ def run():
             max_peers=s.get("max_peers", 50),
             ssh_key=s.get("ssh_key", ""),
             ssh_pass=s.get("ssh_pass", ""),
+            ssh_user=s.get("ssh_user", "root"),
+            ssh_port=int(s.get("ssh_port", 22)),
         )
         for s in cfg["servers"]
     ]

@@ -1,5 +1,6 @@
 # VPN controller configuration
 # Deploy to /etc/vpn-controller/controller.yaml on the controller server.
+# Currently running on tn1 (43.165.128.251).
 
 dns:
   cf_api_token: "<CF_API_TOKEN>"
@@ -11,30 +12,27 @@ check_interval: 30       # seconds between health check rounds
 fail_threshold: 3        # consecutive SSH failures before removing from DNS
 recover_threshold: 2     # consecutive successes before adding back to DNS
 
-# Region map — determines which servers are candidates for each region.
-# Add new regions here; no code changes needed.
 regions:
-  singapore:
-    servers: [a1, tn2]
-  # us:
-  #   servers: [us1]
+  asia:
+    servers: [tn1, minipc]
 
 # Shared AWG identity — all servers use this same keypair.
-# Generate once: awg genkey | tee /tmp/shared.key | awg pubkey
 awg:
   shared_privkey: "<SHARED_AWG_PRIVATE_KEY>"
   shared_pubkey:  "<SHARED_AWG_PUBLIC_KEY>"
-  client_subnet:  "10.8.0.0/24"   # global pool; 10.8.0.1 reserved as gateway
+  client_subnet:  "10.8.1.0/24"   # tn1 clients; minipc owns 10.8.0.0/24
 
 servers:
-  - name: a1
-    ip: "<A1_IP>"
-    region: singapore
+  - name: tn1
+    ip: "<TN1_IP>"
+    region: asia
     max_peers: 50
     ssh_pass: "<ROOT_SSH_PASSWORD>"
 
-  - name: tn2
-    ip: "<TN2_IP>"
-    region: singapore
+  - name: minipc
+    ip: "<MINIPC_IP>"
+    region: asia
     max_peers: 50
-    ssh_pass: "<ROOT_SSH_PASSWORD>"
+    ssh_user: pi
+    ssh_port: 220
+    ssh_key: /etc/vpn-controller/minipc-key

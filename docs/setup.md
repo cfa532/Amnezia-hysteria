@@ -35,7 +35,7 @@ Two transport modes are supported depending on the client type:
   AmneziaWG (utun, obfuscated WireGuard)
     ↓ UDP to 127.0.0.1:1443 (Sequoia) or 127.0.0.1:1444 (Tahoe)
   Hysteria2 client (QUIC/UDP)
-    ↓ QUIC over UDP port 8443 → ISP → internet
+    ↓ QUIC over UDP port 51820 → ISP → internet
   Hysteria2 server (<YOUR_DOMAIN>:443)
     ↓ UDP forwarded to 127.0.0.1:53
   AmneziaWG server (awg0, port 53)
@@ -83,7 +83,7 @@ Mode B is used for mobile devices because Hysteria2 apps are unavailable in the 
 | Service | Port | Config | Notes |
 |---------|------|--------|-------|
 | `awg-quick@awg0` | UDP/443 | `/etc/amnezia/amneziawg/awg0.conf` | iOS/Android direct + macOS via Hysteria2 loopback |
-| `hysteria` | UDP/8443 | `/etc/hysteria/server.yaml` | Hysteria2 QUIC transport for macOS clients |
+| `hysteria` | UDP/51820 | `/etc/hysteria/server.yaml` | Hysteria2 QUIC transport for macOS clients |
 
 > **Note:** AWG uses port 443 (HTTPS/QUIC) because it is universally open and never intercepted by home routers. Port 80 was blocked outbound; port 53 was intercepted by DNS hijacking on home routers and Android devices.
 
@@ -113,7 +113,7 @@ ip link set wg0 down
 - Service: `systemctl status hysteria-4443`
 - Template: `server/hysteria-server.yaml`
 
-Hysteria2 runs on UDP 8443. AWG owns port 443.
+Hysteria2 runs on UDP 51820. AWG owns port 443.
 
 ---
 
@@ -305,7 +305,7 @@ Same spurious host route problem as Sequoia. **Fixed and persistent.**
 TCP to <SERVER_1_IP> throttled to ~26 KB/s. Confirmed by 12+ minute SCP of 20 MB file. QUIC (UDP) is unthrottled — Hysteria2 solves this.
 
 ### 2. AmneziaWG Port Conflict
-Port history: AWG started on 443 (conflicted with Hysteria2), moved to 80 (blocked by home routers), then 53 (intercepted by home router DNS hijacking and Android OS), finally settled on 443 with Hysteria2 moved to 8443.
+Port history: AWG started on 443 (conflicted with Hysteria2), moved to 80 (blocked by home routers), then 53 (intercepted by home router DNS hijacking and Android OS), finally settled on 443 with Hysteria2 moved to 51820.
 
 ### 3. Spurious VPN Host Route (macOS Bug)
 macOS clones a host route for IPs adjacent to VPN subnet boundaries, even if those IPs are excluded from AllowedIPs. Adding a static host route via the physical gateway overrides this.

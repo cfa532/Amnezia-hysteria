@@ -1,7 +1,7 @@
 # Full-Stack VPN — Architecture Design
 
 **Branch:** `full-stack`
-**Status:** In progress — 2026-05-24
+**Status:** Updated — 2026-05-30
 
 ---
 
@@ -13,9 +13,9 @@ Hysteria2 (QUIC/TLS transport) wraps AmneziaWG (obfuscated WireGuard VPN). The c
 Client
   └─ AmneziaWG (endpoint: 127.0.0.1:1443)
        └─ Hysteria2 (QUIC, masquerades as HTTPS)
-              └─ tn1:8443  →  awg0:443
-                   │
-              nebuchadnezzar.fireshare.uk (Cloudflare DNS, TTL 60s)
+              └─ tn1:51820  or  minipc:51820  →  awg0:443
+                        │              │
+              nebuchadnezzar.fireshare.uk (Cloudflare DNS round-robin, TTL 60s)
 ```
 
 ---
@@ -24,10 +24,17 @@ Client
 
 | Component | Host | Details |
 |-----------|------|---------|
-| DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, single A record |
-| VPN + Hysteria2 tn1 | 43.165.128.251 | region: tokyo, awg0 UDP 443, hysteria2 UDP 8443 |
+| DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, two A records (round-robin) |
+| VPN + Hysteria2 tn1 | 43.165.128.251 | region: tokyo, awg0 UDP 443, hysteria2 UDP 51820 |
+| VPN + Hysteria2 minipc | 125.229.161.122 | region: taiwan, awg0 UDP 443, hysteria2 UDP 51820 |
+| Health controller | tn1 (43.165.128.251) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
 
-Decommissioned: a1 (8.222.164.32, Singapore), tn2 (43.160.238.86, Singapore)
+**Decommissioned:** a1 (8.222.164.32, Singapore), tn2 (43.160.238.86, Singapore) — services stopped 2026-05-30
+
+**minipc routing requirements** (non-obvious, will break silent if missing):
+- `iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o enp3s0 -j MASQUERADE` — NAT for tn1 subnet clients
+- `ip route add 10.8.1.0/24 dev awg0` — return path for tn1 clients (minipc's awg0 is 10.8.0.1/24, no auto-route for 10.8.1.x)
+- Both are in `/etc/amnezia/amneziawg/awg0.conf` PostUp/PostDown
 
 ---
 
@@ -112,7 +119,9 @@ Each server has one of three states:
 
 Each server runs:
 - `awg-quick@awg0` on UDP 443 (public for iOS/Android direct; internal for macOS via Hysteria2 loopback)
-- `hysteria.service` on UDP 8443 (public — QUIC, TLS, masquerades as HTTPS)
+- `hysteria.service` on UDP 51820 (public — QUIC, TLS, masquerades as HTTPS)
+
+Both servers share the same Hysteria2 port (51820) so DNS round-robin is transparent to macOS clients. The `hysteria-udp-proxy.py` reads `servers.conf` and randomly selects a server on each new session.
 
 All servers share the same AWG private key and peer list.
 
@@ -266,7 +275,7 @@ No client config changes. No code changes. Existing clients gain the new server 
 
 ## Implementation Status
 
-- [x] `controller/health.py` — SSH-based health loop, Cloudflare DNS state machine
+- [x] `controller/health.py` — SSH-based health loop, Cloudflare DNS state machine (supports ssh_user/ssh_port per server)
 - [x] `controller/provision.py` — FastAPI provisioning API, live peer management
 - [x] `controller/deploy.sh` — install/update script for controller host
 - [x] `controller/vpn-controller.service` — systemd unit for health controller
