@@ -294,6 +294,95 @@ No client config changes. No code changes. Existing clients gain the new server 
 
 ---
 
+## Operations How-To
+
+### Add a server
+
+1. Deploy AWG + Hysteria2 on the new host (use `server/awg0-server.conf` as template). Copy the **shared** AWG private key — do not generate a new one.
+2. Add the server to `/etc/vpn-controller/controller.yaml` under the appropriate region:
+   ```yaml
+   servers:
+     newserver:
+       ip: <ip>
+       region: asia
+       max_peers: 50
+       ssh_user: root        # omit if root
+       ssh_port: 22          # omit if 22
+       ssh_key: /etc/vpn-controller/newserver-key   # or ssh_pass
+   regions:
+     asia:
+       servers: [tn1, minipc, newserver]
+   ```
+3. Add a DNS A record for `nebuchadnezzar.fireshare.uk` pointing to the new server IP (Cloudflare dashboard).
+4. Push all existing client peers to the new server — re-run provisioning for each client **or** manually sync the peer list:
+   ```bash
+   # On tn1: copy peers from an existing server to the new one
+   awg showconf awg0 | grep -A3 "\[Peer\]" | \
+     ssh root@<newserver-ip> "awg addconf awg0 /dev/stdin"
+   ```
+5. Restart health controller to pick up the config change:
+   ```bash
+   systemctl restart vpn-controller
+   ```
+6. For non-root servers (like minipc), ensure sudoers allows AWG without a password:
+   ```
+   <user> ALL=(ALL) NOPASSWD: /usr/bin/awg, /usr/bin/awg-quick
+   ```
+
+**iOS/Android clients get automatic failover** via DNS once the A record is added. macOS clients will pick up the new server on next reprovision (servers.conf is regenerated).
+
+---
+
+### Remove a server
+
+1. Remove its entry from `controller.yaml` (both `servers:` and `regions:`).
+2. Remove its DNS A record from Cloudflare.
+3. Restart health controller: `systemctl restart vpn-controller`.
+4. Clients already have the server in their `servers.conf` — they will try it and fail until the session expires, then fall back to a surviving server. To update immediately, reprovision clients.
+
+---
+
+### Add a user / device
+
+Run `reprovision.sh` on tn1:
+```bash
+export PROVISION_TOKEN=$(cat /etc/vpn-controller/api.token)
+bash /opt/vpn-controller/reprovision.sh <device_name> <os_type> <routing> /tmp/output
+# os_type: macos | ios | android
+# routing: full | split
+```
+Output files are in `/tmp/output/`:
+- `<device_name>.conf` — AWG config to import on the device
+- `servers.conf` — Hysteria2 server list (macOS only)
+
+QR code for mobile:
+```bash
+qrencode -t ansiutf8 < /tmp/output/<device_name>.conf
+```
+
+---
+
+### Remove a user / device
+
+```bash
+curl -s -X DELETE http://127.0.0.1:9000/clients/<device_name> \
+     -H "Authorization: Bearer $(cat /etc/vpn-controller/api.token)"
+```
+This removes the peer from all servers immediately. The client will lose connectivity on next handshake attempt.
+
+---
+
+### Change Hysteria2 port
+
+The Hysteria2 port (default 51820) is set in two places:
+
+1. **Server**: `/etc/hysteria/config.yaml` on each server — change `listen: :51820` and restart `hysteria.service`.
+2. **clients' `servers.conf`**: the port is written at provisioning time by `make_servers_conf()` in `provision.py`. Reprovision all clients after changing the port, or manually update their `servers.conf`.
+
+The AWG port (443) is separate and unaffected.
+
+---
+
 ## Implementation Status
 
 - [x] `controller/health.py` — SSH-based health loop, Cloudflare DNS state machine, active_peers + availability tracking
