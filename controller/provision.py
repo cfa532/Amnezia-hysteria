@@ -37,7 +37,11 @@ TOKEN_PATH   = Path("/etc/vpn-controller/api.token")
 HEALTH_STATE = Path("/var/run/vpn-health.json")
 
 HEALTH_STALE_SECS = 90   # refuse to provision if health data is older than this
-SPLIT_IPS_PATH    = Path("/etc/vpn-controller/split-allowed-ips.txt")
+# Two split lists (see docs/regional-lb-design.md#split-allowedips):
+#   reduced "Taobao-direct" list for iOS/Android (< 128 KB, China-app-friendly)
+#   honest FULL non-China list for macOS (no config-size limit)
+SPLIT_IPS_PATH      = Path("/etc/vpn-controller/split-allowed-ips.txt")        # reduced (mobile)
+FULL_SPLIT_IPS_PATH = Path("/etc/vpn-controller/split-allowed-ips-full.txt")   # full (macOS)
 
 app = FastAPI(title="VPN Provisioning API")
 
@@ -209,10 +213,49 @@ AWG_OBF = (
 )
 
 def _split_allowed_ips() -> str:
+    """Reduced 'Taobao-direct' list for iOS/Android (kept < 128 KB)."""
     if not SPLIT_IPS_PATH.exists():
         raise HTTPException(status_code=500,
                             detail="split-allowed-ips.txt not found on server")
     return _normalize_allowed_ips(SPLIT_IPS_PATH.read_text())
+
+def _full_split_allowed_ips() -> str:
+    """Honest full non-China list for macOS (no config-size limit)."""
+    if not FULL_SPLIT_IPS_PATH.exists():
+        raise HTTPException(status_code=500,
+                            detail="split-allowed-ips-full.txt not found on server")
+    return _normalize_allowed_ips(FULL_SPLIT_IPS_PATH.read_text())
+
+def _exclude_servers(allowed_csv: str, server_ips: list[str]) -> str:
+    """Carve each server's /24 out of a CIDR list, so a client that lands on that
+    server doesn't route the server's own IP into the not-yet-established tunnel.
+    Needed only for iOS/Android (no route-pinner). macOS doesn't call this."""
+    nets = []
+    for tok in allowed_csv.replace(",", " ").split():
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(tok))
+        except ValueError:
+            continue
+    for ip_str in server_ips:
+        try:
+            s24 = ipaddress.ip_network(f"{ip_str}/24", strict=False)
+        except ValueError:
+            continue
+        out = []
+        for n in nets:
+            if n.version != 4:
+                out.append(n); continue
+            if n.subnet_of(s24):          # entirely inside the server /24 → drop
+                continue
+            if s24.subnet_of(n):          # server /24 inside this block → split it out
+                out.extend(n.address_exclude(s24))
+            else:
+                out.append(n)             # disjoint → keep
+        nets = out
+    return ", ".join(str(n) for n in nets)
 
 def _normalize_allowed_ips(raw: str) -> str:
     tokens = []
@@ -260,24 +303,29 @@ def _normalize_routing(routing: str) -> str:
                             detail="routing must be one of: full, split")
     return normalized
 
+# All clients connect to AWG directly on UDP 443 (Hysteria2 transport retired).
 AWG_DIRECT_ENDPOINT = "nebuchadnezzar.fireshare.uk:443"
-AWG_HY2_ENDPOINT    = "127.0.0.1:1443"   # local Hysteria2 UDP forwarder (macOS only)
 
 def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
-                   os_type: str, routing: str = "full") -> str:
+                   os_type: str, routing: str = "split",
+                   server_ips: list[str] | None = None) -> str:
     os_type = _normalize_os_type(os_type)
     routing = _normalize_routing(routing)
+    server_ips = server_ips or []
 
-    if routing == "split":
-        allowed = _split_allowed_ips()
-    elif os_type in {"ios", "android"}:
-        allowed = "0.0.0.0/0, ::/0"
+    if routing == "full":
+        # macOS uses a split-default route to dodge a macOS sendmsg bug with 0.0.0.0/0.
+        allowed = ("0.0.0.0/0, ::/0" if os_type in {"ios", "android"}
+                   else "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1")
+    elif os_type == "macos":
+        # Full honest non-China list. No server exclusion: awg-en1-route pins them.
+        allowed = _full_split_allowed_ips()
     else:
-        allowed = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"
+        # iOS/Android: reduced Taobao-direct list, with server /24s carved out
+        # (no route-pinner on mobile, so a covered server IP would loop).
+        allowed = _exclude_servers(_split_allowed_ips(), server_ips)
 
-    # Mobile clients have no local Hysteria2 daemon — connect directly.
-    # macOS runs Hysteria2 locally and routes AWG traffic through it.
-    endpoint = AWG_DIRECT_ENDPOINT if os_type in {"ios", "android"} else AWG_HY2_ENDPOINT
+    endpoint = AWG_DIRECT_ENDPOINT
 
     return (
         f"[Interface]\n"
@@ -391,7 +439,8 @@ def provision(req: ProvisionRequest,
     save_state(state)
 
     wg_config    = make_wg_config(req.device_privkey, client_ip,
-                                   shared_pubkey, os_type, routing)
+                                   shared_pubkey, os_type, routing,
+                                   server_ips=[s["ip"] for s in cfg["servers"]])
     servers_conf = make_servers_conf(cfg["servers"])
 
     log.info(f"Provisioned {req.device_name} → preferred={preferred['name']}"

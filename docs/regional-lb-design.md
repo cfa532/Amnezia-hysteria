@@ -224,7 +224,7 @@ H1 = 11223  H2 = 44556  H3 = 77889  H4 = 99001
 [Peer]
 PublicKey = <shared-awg-pubkey>             ← same for every server
 Endpoint = nebuchadnezzar.fireshare.uk:443  ← DNS round-robin to tn1/minipc
-AllowedIPs = <full non-China CIDR list from /etc/vpn-controller/split-allowed-ips.txt on tn1>
+AllowedIPs = <honest FULL non-China list (~11975 routes) — NOT the reduced split-allowed-ips.txt, which is the mobile list>
 PersistentKeepalive = 25
 ```
 
@@ -385,16 +385,33 @@ The AWG port (443) is separate and unaffected.
 
 ### Two-tier CIDR lists
 
-Split-tunnel routing requires two different AllowedIPs lists because macOS and iOS/Android have different capabilities:
+Split-tunnel routing uses **two different-sized AllowedIPs lists** because iOS/Android
+have a config-size limit that macOS does not (`docs/setup.md`): iOS showed unreliable
+handshakes with the honest full list (~198 KB, **11975 routes**); a reduced list under
+128 KB connects reliably.
 
-| Platform | Source | Server IP exclusions needed? |
-|----------|--------|------------------------------|
-| macOS | `/etc/vpn-controller/split-allowed-ips.txt` on tn1 | No — route-fix daemon handles it |
-| iOS / Android | Same base list + per-server CIDR splits | Yes — no daemon possible |
+| Platform | List | Character | Server IP exclusions needed? |
+|----------|------|-----------|------------------------------|
+| **macOS** | honest **full** split list (~11975 routes, ~198 KB) | full non-China coverage | No — `awg-en1-route` daemon pins server IPs |
+| **iOS / Android** | **reduced "Taobao-direct"** split list (~7798 routes, < 128 KB) + per-server CIDR splits | size-limited *and* China-app-friendly | Yes — no route-pinner possible on mobile |
 
-**macOS** uses the full uncompressed non-China CIDR list stored at `/etc/vpn-controller/split-allowed-ips.txt` on tn1. It is generated once and updated only when the China routing table changes significantly. Server IPs do not need to be excluded because the `awg-en1-route` daemon resolves the endpoint hostname and adds `/32` host routes via en1 that take precedence over any AllowedIPs match.
+**macOS** uses the full list — the honest non-China complement (~11975 routes). macOS
+has no config-size limit, so it keeps full coverage. Server IPs do **not** need to be
+excluded: the `awg-en1-route` daemon resolves the endpoint hostname and installs `/32`
+host routes via en1 that take precedence over any matching AllowedIPs CIDR.
 
-**iOS/Android** use the same base list, but any server IP that falls inside a covered CIDR must be manually excluded via a CIDR split before the conf is distributed.
+**iOS/Android** use the reduced **Taobao-direct** list (`/etc/vpn-controller/split-allowed-ips.txt`
+on tn1, ~7798 routes). It is tailored two ways: (1) kept under 128 KB so the conf imports
+reliably via QR — iOS handshakes were unreliable with the 198 KB full list; and (2)
+curated so Taobao and other major Chinese apps route **direct** (outside the tunnel),
+keeping them fast and avoiding breakage. Because mobile cannot run a route-pinner, any
+server IP inside a covered CIDR must also be excluded with a per-server CIDR split
+before the conf is distributed.
+
+> **Do not confuse the two.** `split-allowed-ips.txt` is the *reduced (mobile)* list.
+> Applying it to a Mac silently downgrades that Mac's coverage. The full macOS list is
+> larger and is the honest non-China complement (generated via the
+> [procustodibus AllowedIPs calculator](https://www.procustodibus.com/blog/2021/03/wireguard-allowedips-calculator/)).
 
 ### Current server IP coverage
 
@@ -405,14 +422,18 @@ Split-tunnel routing requires two different AllowedIPs lists because macOS and i
 
 macOS clients are unaffected. iOS/Android clients connecting to minipc as their active server will experience a routing loop and handshake failure until `125.229.161.0/24` is split out of `125.224.0.0/12` in the iOS conf files.
 
-### Updating the macOS split list
+### Updating the split lists
+
+The **reduced (mobile)** list lives at `/etc/vpn-controller/split-allowed-ips.txt` on
+tn1 (served by `provision.py`). The **full (macOS)** list is the honest non-China
+complement (~11975 routes); regenerate it with the procustodibus calculator from the
+current China CIDR set. **Do not** copy the reduced list onto a Mac.
 
 ```bash
-# On tn1 — regenerate from an updated China CIDR source and deploy
-# Then reprovision all macOS clients or manually update their AllowedIPs
-sshpass -p '<password>' ssh root@43.165.128.251 \
-    "cat /etc/vpn-controller/split-allowed-ips.txt" > /tmp/split-allowed-ips.txt
-# Update mac1.conf, mac2.conf AllowedIPs, re-import in AmneziaWG app
+# macOS: put the FULL list (not split-allowed-ips.txt) into mac1.conf / mac2.conf
+#        AllowedIPs, then re-import in the AmneziaWG app.
+# Mobile: update split-allowed-ips.txt (keep it < 128 KB), re-run the per-server
+#         CIDR split, and redistribute QR codes.
 ```
 
 ### Adding a new server — AllowedIPs checklist
