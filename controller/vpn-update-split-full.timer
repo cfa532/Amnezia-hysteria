@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly refresh of the full non-China split list (macOS provisioning)
+
+[Timer]
+OnCalendar=Sun 04:50
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

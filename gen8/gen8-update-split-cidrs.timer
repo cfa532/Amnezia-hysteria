@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly refresh of gen8 split VPN CIDR table
+
+[Timer]
+OnCalendar=Sun 04:20
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh gen8 non-China split VPN CIDR table
+After=network-online.target gen8-awg-tahoe.service gen8-ap-split-vpn.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/gen8-update-split-cidrs --apply

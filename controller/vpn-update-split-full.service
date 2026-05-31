@@ -1,0 +1,8 @@
+[Unit]
+Description=Regenerate the full non-China split list for macOS provisioning (APNIC)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-controller/update-split-full-list.py
