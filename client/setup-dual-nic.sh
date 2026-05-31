@@ -95,16 +95,16 @@ sed "s|<USERNAME>|$(whoami)|g" \
     "$CLIENT/uk.fireshare.hysteria.plist" \
     > "$AGENTS/uk.fireshare.hysteria.plist"
 
-# ── 7. Route-fix LaunchDaemon (requires sudo) ─────────────────────────────────
-log "Installing route-fix daemon (requires sudo)..."
-sudo cp "$CLIENT/fix-hysteria-route.sh" /usr/local/bin/fix-hysteria-route.sh
-sudo chmod +x /usr/local/bin/fix-hysteria-route.sh
-sudo cp "$CLIENT/uk.fireshare.hysteria-route.plist" /Library/LaunchDaemons/
+# ── 7. AWG en1 route-pinner LaunchDaemon (requires sudo) ──────────────────────
+log "Installing AWG en1 route-pinner daemon (requires sudo)..."
+sudo cp "$CLIENT/awg-en1-route.sh" /usr/local/bin/awg-en1-route.sh
+sudo chmod +x /usr/local/bin/awg-en1-route.sh
+sudo cp "$CLIENT/uk.fireshare.awg-en1-route.plist" /Library/LaunchDaemons/
 
-if sudo launchctl list uk.fireshare.hysteria-route &>/dev/null; then
-    sudo launchctl bootout system /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist 2>/dev/null || true
+if sudo launchctl list uk.fireshare.awg-en1-route &>/dev/null; then
+    sudo launchctl bootout system /Library/LaunchDaemons/uk.fireshare.awg-en1-route.plist 2>/dev/null || true
 fi
-sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.awg-en1-route.plist
 
 # ── 8. Load / reload LaunchAgents ────────────────────────────────────────────
 log "Loading LaunchAgents..."

@@ -1,17 +1,18 @@
 #!/bin/bash
-# Dynamic route-fix for macOS AmneziaWG clients.
+# awg-en1-route — pin the AmneziaWG endpoint to the en1 (clean WiFi) gateway.
 #
-# macOS clones a host route for the AWG endpoint IP onto the utun interface when
-# the tunnel activates, which captures the endpoint's own packets and loops them
-# back into the tunnel. This daemon re-pins the endpoint IP(s) to the physical
-# gateway so they always exit via the clean physical path instead of utun.
+# macOS clones a /32 host route for the AWG endpoint IP onto the utun interface
+# when the tunnel activates, looping the endpoint's own packets back into the
+# tunnel. This daemon re-pins the endpoint IP(s) to en1's gateway so the Mac's
+# AWG always egresses via the clean WiFi path (en1) — never via utun (loop) or
+# the wired soft-router link (en0, which carries its own always-on VPN).
 #
-# Targets are resolved dynamically from the AWG endpoint hostname's A records, so
-# the client is server-agnostic: adding/moving/removing a backend is a DNS-only
-# change and every client adapts on the next route-monitor tick. No servers.conf,
-# no per-server config baked into the client.
+# Targets are resolved from the AWG endpoint hostname's A records, so the client
+# is server-agnostic: it follows DNS round-robin and any backend change with no
+# per-client edits. (Formerly fix-hysteria-route.sh — nothing to do with
+# Hysteria, which has been retired; renamed to end the confusion.)
 ENDPOINT_HOST="${ENDPOINT_HOST:-nebuchadnezzar.fireshare.uk}"
-IFACE="${ROUTE_FIX_IFACE:-en1}"
+IFACE="${AWG_ROUTE_IFACE:-en1}"
 
 # Resolve the endpoint hostname to its current set of IPv4 A records.
 resolve_targets() {

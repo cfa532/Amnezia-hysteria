@@ -2,28 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- LaunchDaemon (system-level, runs as root) — required for route commands -->
 <!-- Install to: /Library/LaunchDaemons/ -->
-<!-- Load with: sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist -->
+<!-- Load with: sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.awg-en1-route.plist -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>uk.fireshare.hysteria-route</string>
+    <string>uk.fireshare.awg-en1-route</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/usr/local/bin/fix-hysteria-route.sh</string>
+        <string>/usr/local/bin/awg-en1-route.sh</string>
     </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HOME</key>
-        <string>/Users/REPLACE_WITH_USERNAME</string>
-    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/hysteria-route.log</string>
+    <string>/tmp/awg-en1-route.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/hysteria-route.log</string>
+    <string>/tmp/awg-en1-route.log</string>
 </dict>
 </plist>
