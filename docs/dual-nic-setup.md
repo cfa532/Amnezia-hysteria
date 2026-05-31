@@ -2,54 +2,53 @@
 
 This guide covers any macOS machine with **two physical network interfaces** where:
 
-- **en0** (wired) connects through a soft router that runs its own VPN
-- **en1** (WiFi) connects directly to the home router — the path used for VPN testing
+- **en0** (wired) connects through the gen8 soft router, which runs its own always-on VPN
+- **en1** (WiFi) connects directly to the home router — the clean path for this machine's own VPN
 
 Machines with this topology: **mac1 (Sequoia)**, **mac2 (Tahoe)**.
 
----
-
-## Network topology
-
-| Interface | Connected to | Used for VPN |
-|-----------|-------------|-------------|
-| en0 (wired) | Soft router (built-in VPN) | No — traffic gets re-wrapped |
-| en1 (WiFi) | Home router | Yes — clean path to the internet |
-
-All Hysteria2 traffic must leave through **en1**.
-
----
-
-## Why the regular setup is not enough
-
-Regular macOS clients prevent routing loops with host routes: permanent `/32` routes for the server IPs that point at the physical gateway instead of the tunnel interface. The route-fix daemon (`uk.fireshare.hysteria-route`) maintains these routes and is installed on dual-NIC machines too.
-
-Host routes work correctly under normal conditions. However, on macOS 26 with two active "interfaces" (en1 + the AWG utun), the kernel's UDP source-address selection does not reliably honour the host routes when choosing a source IP for outgoing QUIC packets. Observed behaviour:
-
-- With **both en0 and en1 active**: source-address selection happens to pick en1 correctly — VPN works.
-- With **only en1 active** (en0 disabled or unplugged) **and AWG tunnel active**: macOS sometimes picks the wrong source address, the QUIC handshake to the server fails, and AWG times out waiting for a response.
-
-The fix is to bind the outgoing socket to en1's IP explicitly, bypassing source-address selection entirely.
+> **Note:** This stack used to tunnel AmneziaWG over a local Hysteria2 proxy. That
+> has been **retired** — macOS now connects to AmneziaWG **directly** on UDP 443,
+> exactly like iOS. The only macOS-specific piece left is a small route-pinner
+> daemon (`awg-en1-route`) that keeps the tunnel on en1.
 
 ---
 
 ## Architecture
 
-An extra component sits between Hysteria2 and the server: `hysteria-udp-proxy.py`.
-
 ```
-AmneziaWG app ──UDP──▶ 127.0.0.1:1443 (Hysteria2 UDP forwarder)
-                              │
-                    Hysteria2 client (QUIC)
-                              │
-                    127.0.0.1:9443 (hysteria-udp-proxy.py)
-                              │  ← outgoing socket bound to en1 IP
-                    UDP :443 via WiFi (en1)
-                              │
-                    VPN server — nebuchadnezzar.fireshare.uk
+AmneziaWG (utun) ──UDP 443──▶ nebuchadnezzar.fireshare.uk
+                               (Cloudflare DNS round-robin: tn1 / minipc)
+     AllowedIPs = split list (China direct, everything else via VPN)
 ```
 
-The proxy reads the current server from `servers.conf` and creates one UDP socket per session, bound to en1's IP. macOS routes those packets out through en1 regardless of routing table state.
+The Mac runs its **own** AmneziaWG tunnel over en1. The endpoint hostname
+round-robins across the backend servers; whichever one DNS hands out, the Mac
+connects to it directly.
+
+### Why a route-pinner is still needed
+
+Two interface problems have to be solved for the Mac's own tunnel:
+
+1. **The macOS clone-route quirk.** When AmneziaWG activates, macOS clones a `/32`
+   host route for the endpoint IP onto the `utun` interface. That captures the
+   tunnel's own handshake/keepalive packets and loops them back into the tunnel,
+   so the handshake can never complete.
+2. **The wrong physical interface.** Left alone, the endpoint route can fall onto
+   **en0** (the gen8 wired link). en0 leads to the soft router's own VPN, so the
+   Mac's tunnel would be needlessly wrapped a second time.
+
+The **`awg-en1-route`** LaunchDaemon fixes both. It resolves the endpoint
+hostname's A records and pins each one to **en1's gateway**, so the tunnel always
+egresses via the clean WiFi path — never utun, never en0. Because it reads the
+endpoint from DNS, it is **server-agnostic**: add, move, or remove a backend and
+the Mac adapts on the next route-table change, with no client edits.
+
+### Failover
+
+DNS-based. The controller removes a dead server's A record from
+`nebuchadnezzar.fireshare.uk`; AWG re-resolves on its next handshake and lands on
+a surviving server. No local proxy or failover agent.
 
 ---
 
@@ -58,249 +57,94 @@ The proxy reads the current server from `servers.conf` and creates one UDP socke
 ### Prerequisites
 
 - macOS 13 Ventura or later
-- WiFi connected to the home router (en1 must have an IP before the proxy starts)
-- Provisioned files: `macN.conf`, `macN-servers.conf` in `~/Documents/Gen8/`
+- WiFi (en1) connected to the home router
+- Your provisioned `macN.conf` (e.g. in `~/Documents/Gen8/`)
 - Repo cloned at `~/Documents/GitHub/Amnezia-hysteria`
 
-### Step 0 — Run the setup script
+### Step 1 — Import the AmneziaWG config
 
-One script installs and configures everything identically on any dual-NIC machine:
-
-```bash
-cd ~/Documents/GitHub/Amnezia-hysteria/client
-./setup-dual-nic.sh mac1   # replace mac1 with your device name
-```
-
-The script installs the Hysteria2 binary, UDP proxy, failover monitor, and route-fix daemon; writes `client.yaml` in proxy mode; and loads all LaunchAgents. It requires `sudo` once for the route-fix daemon.
-
-If the script succeeds, skip to [Verification](#verification). The manual steps below are for reference only.
-
----
-
-### Step 1 — AmneziaWG
-
-Install from the Mac App Store (search **AmneziaWG**), then import your `macN.conf`:
+Install **AmneziaWG** from the Mac App Store, then import your `macN.conf`:
 
 1. AmneziaWG → **+** → **Import tunnel(s) from file** → select `macN.conf`
 2. Click **Allow** when macOS prompts to add a VPN configuration
 
-The config has `Endpoint = 127.0.0.1:1443` — do not change it.
+Confirm the Peer section shows:
 
----
+| Field | Expected value |
+|-------|---------------|
+| Endpoint | `nebuchadnezzar.fireshare.uk:443` |
+| AllowedIPs | a long split CIDR list (China excluded) |
 
-### Step 2 — Hysteria2 binary
+> If the endpoint is `127.0.0.1:1443`, that is an old Hysteria-era config —
+> re-import the current `macN.conf`.
 
-```bash
-mkdir -p ~/bin
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/')
-curl -L "https://github.com/apernet/hysteria/releases/latest/download/hysteria-darwin-${ARCH}" \
-     -o ~/bin/hysteria
-chmod +x ~/bin/hysteria
-~/bin/hysteria version
-```
+### Step 2 — Install the route-pinner
 
----
-
-### Step 3 — Config directory and servers.conf
+One script installs and loads everything (it also removes any leftover
+Hysteria-era agents). It needs `sudo` once for the LaunchDaemon:
 
 ```bash
-mkdir -p ~/Library/Application\ Support/hysteria
-cp macN-servers.conf ~/Library/Application\ Support/hysteria/servers.conf
+cd ~/Documents/GitHub/Amnezia-hysteria/client
+./setup-dual-nic.sh
 ```
 
----
+The daemon (`uk.fireshare.awg-en1-route`) runs `/usr/local/bin/awg-en1-route.sh`,
+logging to `/tmp/awg-en1-route.log`.
 
-### Step 4 — UDP proxy
+### Step 3 — Connect
 
-The proxy binds outgoing sockets to en1. Install it and its LaunchAgent:
-
-```bash
-cp ~/Documents/GitHub/Amnezia-hysteria/client/hysteria-udp-proxy.py ~/bin/
-chmod +x ~/bin/hysteria-udp-proxy.py
-
-sed "s|REPLACE_USER|$(whoami)|g" \
-    ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria-proxy.plist \
-    > ~/Library/LaunchAgents/uk.fireshare.hysteria-proxy.plist
-
-launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria-proxy.plist
-```
-
-Verify it started and found en1:
-```bash
-tail -5 /tmp/hysteria-proxy.log
-# Expected: binding remote sockets to en1 (192.168.x.x)
-#           proxy up on 127.0.0.1:9443
-```
-
----
-
-### Step 5 — client.yaml
-
-Point Hysteria2 at the proxy, not directly at the server:
-
-```bash
-cat > ~/Library/Application\ Support/hysteria/client.yaml << 'EOF'
-server: 127.0.0.1:9443
-
-auth: morphous-hy2-2026
-
-tls:
-  sni: nebuchadnezzar.fireshare.uk
-  insecure: false
-
-transport:
-  udp:
-    hopInterval: 0s
-
-udpForwarding:
-  - listen: 127.0.0.1:1443
-    remote: 127.0.0.1:443
-    timeout: 0s
-EOF
-```
-
----
-
-### Step 6 — Route-fix daemon
-
-Maintains host routes for the server IPs so they always exit via en1, not the AWG tunnel. Requires `sudo`.
-
-```bash
-sudo cp ~/Documents/GitHub/Amnezia-hysteria/client/fix-hysteria-route.sh \
-     /usr/local/bin/fix-hysteria-route.sh
-sudo chmod +x /usr/local/bin/fix-hysteria-route.sh
-
-sudo cp ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria-route.plist \
-     /Library/LaunchDaemons/
-
-sudo launchctl bootstrap system \
-     /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist
-```
-
-Verify:
-```bash
-route get 43.165.128.251    # interface must be en1, NOT utunX
-route get 125.229.161.122
-```
-
----
-
-### Step 7 — Hysteria2 LaunchAgent
-
-```bash
-sed "s|<USERNAME>|$(whoami)|g" \
-    ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria.plist \
-    > ~/Library/LaunchAgents/uk.fireshare.hysteria.plist
-
-launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria.plist
-```
-
----
-
-### Step 8 — Failover monitor
-
-```bash
-cp ~/Documents/GitHub/Amnezia-hysteria/client/hysteria-failover-client.sh \
-   ~/bin/hysteria-failover-client.sh
-chmod +x ~/bin/hysteria-failover-client.sh
-
-cp ~/Documents/GitHub/Amnezia-hysteria/client/uk.fireshare.hysteria-failover.plist \
-   ~/Library/LaunchAgents/
-
-launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria-failover.plist
-```
-
-When the failover script switches servers, it restarts the proxy first (to clear stale sessions) and then restarts Hysteria2.
-
----
-
-### Load order summary
-
-The proxy must be running before Hysteria2 starts:
-
-```bash
-launchctl kickstart -k gui/$(id -u)/uk.fireshare.hysteria-proxy
-sleep 1
-launchctl kickstart -k gui/$(id -u)/uk.fireshare.hysteria
-```
-
----
-
-## Split routing
-
-Your provisioned `macN.conf` has `AllowedIPs` set to the full non-China CIDR list: Chinese IP ranges route direct via the ISP; all other traffic goes through the VPN.
-
-The route-fix daemon (`fix-hysteria-route.sh`) reads `servers.conf` at runtime and installs `/32` host routes for every server IP via en1. This means server IPs do not need to be excluded from `AllowedIPs` — the `/32` routes take precedence over any matching CIDR block. If the server list changes, the daemon picks up the new IPs on next restart.
-
-The current macOS AllowedIPs list is maintained at `/etc/vpn-controller/split-allowed-ips.txt` on tn1. To update after a China routing table change:
-1. Update `split-allowed-ips.txt` on tn1
-2. Pull the updated list into your `macN.conf` and re-import in the AmneziaWG app
-
-If provisioned with `routing=full`, `AllowedIPs = 0.0.0.0/0, ::/0` and all traffic goes through the VPN. Contact the admin to switch to split routing.
+Toggle the tunnel **on** in the AmneziaWG app.
 
 ---
 
 ## Verification
 
 ```bash
-# 1. Proxy bound to en1
-tail -5 /tmp/hysteria-proxy.log
+# 1. Route-pinner is running
+sudo launchctl list uk.fireshare.awg-en1-route
 
-# 2. Hysteria2 connected via proxy
-tail -20 /tmp/hysteria-mac.log   # look for: connected to server {"addr": "127.0.0.1:9443", ...}
+# 2. Each endpoint IP is pinned to en1 (not utun, not en0)
+for ip in $(dig +short nebuchadnezzar.fireshare.uk A); do route get "$ip" | awk '/interface:/{print $2}'; done
+# expect: en1   en1
 
-# 3. AWG handshake — toggle tunnel off/on in AmneziaWG, wait ~5s, check timestamp in app
-
-# 4. Traffic exits through VPN server
-curl -s https://api.ipify.org   # must return the VPN server IP, not your ISP IP
+# 3. Traffic exits through the VPN
+curl -s https://api.ipify.org   # should return a VPN server IP (tn1 or minipc), not your ISP IP
 ```
 
 ---
 
 ## Troubleshooting
 
-### Proxy log shows no en1 IP
+### AWG shows no handshake / no internet when the tunnel is on
+
+The endpoint is probably looping through utun or pinned to the wrong interface.
 
 ```bash
-ipconfig getifaddr en1
+sudo launchctl list uk.fireshare.awg-en1-route          # must show a PID
+for ip in $(dig +short nebuchadnezzar.fireshare.uk A); do route get "$ip" | awk '/interface:/{print $2}'; done
+# must be en1 for every IP; if you see utunX or en0, kick the daemon:
+sudo launchctl kickstart -k system/uk.fireshare.awg-en1-route
+tail -20 /tmp/awg-en1-route.log
 ```
 
-If blank, WiFi is not connected. Connect en1 to the home router, then restart the proxy:
+### Route-pinner log says "no gateway on en1 yet"
+
+en1 (WiFi) is not connected. Join the home WiFi, then:
+
 ```bash
-launchctl kickstart -k gui/$(id -u)/uk.fireshare.hysteria-proxy
+sudo launchctl kickstart -k system/uk.fireshare.awg-en1-route
 ```
 
-The proxy waits up to 60 seconds for en1 to get an IP before giving up.
+### Daemon won't load with "Input/output error" (errno 5)
 
-### Hysteria2 log shows "connection refused" on 127.0.0.1:9443
+A stale job under the same label. Bootout, then bootstrap:
 
-The proxy is not running. Check:
 ```bash
-launchctl list uk.fireshare.hysteria-proxy
-tail -10 /tmp/hysteria-proxy.log
+sudo launchctl bootout system/uk.fireshare.awg-en1-route 2>/dev/null
+sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.awg-en1-route.plist
 ```
 
-### AmneziaWG shows no handshake
+### curl returns your ISP IP instead of a VPN IP
 
-1. `launchctl list uk.fireshare.hysteria` — Hysteria2 must show a PID
-2. `netstat -an | grep 1443` — forwarder must be listening
-3. `tail -20 /tmp/hysteria-mac.log` — check for connection errors
-
-### AWG connects but curl returns ISP IP
-
-The route-fix daemon may not be running or the routes are stale:
-```bash
-sudo launchctl list uk.fireshare.hysteria-route
-route get 43.165.128.251   # must NOT show utunX
-```
-
-### Hysteria2 connects but no data flows through AWG
-
-Check that your device has a recent handshake on the server:
-```bash
-# SSH to whichever server your proxy selected (check /tmp/hysteria-server-index)
-sshpass -p '<password>' ssh root@43.165.128.251 "awg show awg0"
-# Look for your device's allowed IP — last handshake should be within the last few minutes
-```
-
-If handshake is missing, the device may not be registered as a peer on that server. Contact the admin.
+The tunnel isn't active, or the AWG handshake is stale (> 3 min). Toggle the
+tunnel off and on, then re-check the handshake timestamp in the app.

@@ -20,9 +20,13 @@ This repository has three independent branches. Each represents a distinct archi
 
 | Guide | Description |
 |-------|-------------|
-| [docs/client-setup.md](docs/client-setup.md) | Set up the VPN client on a regular macOS machine |
-| [docs/tahoe-setup.md](docs/tahoe-setup.md) | Set up Tahoe (mac2) — dual-NIC debug machine |
-| [docs/regional-lb-design.md](docs/regional-lb-design.md) | Architecture: shared keypair, load balancing, provisioning API |
+| [docs/client-setup.md](docs/client-setup.md) | Set up a regular (single-NIC) macOS client — direct AWG |
+| [docs/dual-nic-setup.md](docs/dual-nic-setup.md) | Set up a dual-NIC Mac (mac1/Sequoia, mac2/Tahoe) — direct AWG over en1 |
+| [docs/tahoe-setup.md](docs/tahoe-setup.md) | Tahoe (mac2) — pointer to the dual-NIC guide |
+| [docs/ios-setup.md](docs/ios-setup.md) | iPhone / iPad — direct AWG |
+| [docs/regional-lb-design.md](docs/regional-lb-design.md) | Architecture: shared keypair, DNS round-robin, provisioning API |
+| [docs/gen8-setup.md](docs/gen8-setup.md) | gen8 soft router — direct AWG to minipc; cross-strait lessons |
+| [docs/hysteria-legacy.md](docs/hysteria-legacy.md) | Retired Hysteria2 client/server how-to, kept for reference |
 
 ---
 
@@ -273,88 +277,29 @@ Requires a Cloudflare API token with `Zone:DNS:Edit` permission and your Zone ID
 
 ### Client Setup (macOS)
 
-#### 1. Generate Key Pairs
+macOS connects to AmneziaWG **directly** on UDP 443 — `nebuchadnezzar.fireshare.uk`,
+Cloudflare DNS round-robin across the backends. (An earlier design tunnelled AWG
+over a per-Mac Hysteria2 proxy on `127.0.0.1:1443`; that has been **retired** for
+the macOS clients — see the cross-strait caveat under *Why Hysteria2* above.)
 
-Each device needs a unique key pair. In the AmneziaWG app: Settings → Add tunnel → Create from scratch, or via CLI:
+Each Mac needs two things:
 
-```bash
-awg genkey | tee private.key | awg pubkey > public.key
-```
+1. **An AmneziaWG profile** (`macN.conf`) with `Endpoint = nebuchadnezzar.fireshare.uk:443`,
+   a client IP from `10.8.1.0/24`, and a split-tunnel `AllowedIPs` (China direct,
+   everything else via VPN). Generate it with `client/reprovision.sh`. Server IPs do
+   **not** need to be excluded from `AllowedIPs` — the route-pinner below handles that.
 
-Register each device's public key on the server with a unique VPN IP (`10.8.0.2`, `10.8.0.3`, etc.).
+2. **The `awg-en1-route` LaunchDaemon**, which resolves the endpoint hostname and
+   pins each A record to the physical interface's gateway, so the macOS clone-route
+   quirk can't loop the tunnel and so it egresses the clean interface (en1 on
+   dual-NIC machines, not the gen8-wired en0).
 
-#### 2. AmneziaWG Profile
+Step-by-step guides:
+- Single-NIC Macs → [docs/client-setup.md](docs/client-setup.md)
+- Dual-NIC Macs (mac1/Sequoia, mac2/Tahoe) → [docs/dual-nic-setup.md](docs/dual-nic-setup.md)
 
-Create an AmneziaWG tunnel profile pointing to `127.0.0.1:<local-hysteria2-port>`:
-
-```ini
-[Interface]
-PrivateKey = <DEVICE_PRIVATE_KEY>
-Address = 10.8.0.<N>/32
-DNS = 10.8.0.1
-MTU = 1280
-Jc = 4
-Jmin = 40
-Jmax = 70
-S1 = 30 / S2 = 40 / S3 = 30 / S4 = 40
-H1 = 11223 / H2 = 44556 / H3 = 77889 / H4 = 99001
-
-[Peer]
-PublicKey = <SERVER_PUBLIC_KEY>
-Endpoint = 127.0.0.1:1443
-AllowedIPs = 0.0.0.0/1, 128.0.0.0/2, 192.0.0.0/9, 192.128.0.0/11, ...
-             # All IPs EXCEPT the Hysteria2 server IPs (<SERVER_1_IP>, <SERVER_2_IP>)
-PersistentKeepalive = 25
-```
-
-Import this profile into the AmneziaWG macOS app.
-
-#### 3. Install Hysteria2 Client and Server Registry
-
-Download the arm64 binary:
-```bash
-curl -fsSL https://github.com/apernet/hysteria/releases/latest/download/hysteria-darwin-arm64 \
-  -o ~/bin/hysteria
-chmod +x ~/bin/hysteria
-```
-
-Create `~/Library/Application Support/hysteria/client.yaml` (see `client/hysteria-client-device1.yaml`).
-
-Copy the server registry alongside it:
-```bash
-cp config/servers.conf ~/Library/Application\ Support/hysteria/servers.conf
-# Edit to replace placeholders with real IPs
-```
-
-The client failover script reads `servers.conf` to discover all servers. On first run it picks a random server, distributing load across devices.
-
-#### 4. Install LaunchAgents and LaunchDaemons
-
-**Hysteria2 auto-start** (LaunchAgent, runs as user):
-```bash
-cp client/uk.fireshare.hysteria.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria.plist
-```
-
-**Route fix** (LaunchDaemon, runs as root — required for `route` commands):
-```bash
-sudo cp client/fix-hysteria-route.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/fix-hysteria-route.sh
-sudo cp client/uk.fireshare.hysteria-route.plist /Library/LaunchDaemons/
-sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.hysteria-route.plist
-```
-
-**Client failover** (LaunchAgent, runs as user):
-```bash
-cp client/hysteria-failover-client.sh ~/bin/
-chmod +x ~/bin/hysteria-failover-client.sh
-cp client/uk.fireshare.hysteria-failover.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/uk.fireshare.hysteria-failover.plist
-```
-
-#### 5. Add Server IPs to AmneziaWG AllowedIPs Exclusion
-
-Both Hysteria2 server IPs must be excluded from the WireGuard tunnel's `AllowedIPs`. If they are included, Hysteria2's own packets get captured by WireGuard → infinite loop.
+Failover is DNS-based: the controller pulls a dead server's A record and AWG
+re-resolves on the next handshake — no local proxy or failover agent.
 
 ---
 
@@ -445,16 +390,19 @@ tail -f /tmp/hysteria-failover-client.log
 │   ├── hysteria-server.yaml  # Hysteria2 server config template
 │   └── failover.sh           # Server-side Cloudflare DNS monitor (reads servers.conf)
 ├── client/
-│   ├── hysteria-client-device1.yaml         # Hysteria2 client config (device1/port 1443)
-│   ├── hysteria-client-device2.yaml         # Hysteria2 client config (device2/port 1444)
-│   ├── fix-hysteria-route.sh                # macOS route fix (reactive, dynamic gateway)
-│   ├── hysteria-failover-client.sh          # Client load balancer and failover (reads servers.conf)
-│   ├── uk.fireshare.hysteria.plist          # Hysteria2 LaunchAgent
-│   ├── uk.fireshare.hysteria-route.plist    # Route fix LaunchDaemon (runs as root)
-│   └── uk.fireshare.hysteria-failover.plist # Load balancer LaunchAgent (runs every 2 min)
+│   ├── awg-en1-route.sh                     # macOS route-pinner: pins the DNS-resolved
+│   │                                        #   AWG endpoint IPs to the en1 gateway
+│   ├── uk.fireshare.awg-en1-route.plist     # Route-pinner LaunchDaemon (runs as root)
+│   ├── setup-dual-nic.sh                    # Installs the route-pinner on a dual-NIC Mac
+│   ├── reprovision.sh                       # Admin-side device provisioning (calls the API)
+│   └── (legacy Hysteria-era client scripts retained for reference only)
 └── amneziawg/
     └── device-template.conf  # AmneziaWG client profile template
 ```
+
+> The `client/hysteria-*` scripts and plists are from the retired per-Mac
+> Hysteria2 proxy design. They are kept for reference but are no longer installed
+> on macOS clients (see *Client Setup (macOS)* above).
 
 ---
 
