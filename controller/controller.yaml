@@ -14,7 +14,7 @@ recover_threshold: 2     # consecutive successes before adding back to DNS
 
 regions:
   asia:
-    servers: [tn1]
+    servers: [tn1, minipc]
 
 # Shared AWG identity — all servers use this same keypair.
 awg:
@@ -29,7 +29,10 @@ servers:
     max_peers: 50
     ssh_pass: "<ROOT_SSH_PASSWORD>"
 
-# minipc (125.229.161.122) removed from controller management 2026-05-31.
-# It is gen8's dedicated server (direct AWG, hardcoded IP) and is no longer
-# a mobile VPN endpoint, so it is not in the DNS round-robin, health checks,
-# or peer provisioning. See docs/gen8-setup.md.
+  - name: minipc
+    ip: "<MINIPC_IP>"
+    region: asia
+    max_peers: 50
+    ssh_user: pi
+    ssh_port: 220
+    ssh_key: /etc/vpn-controller/minipc-key
