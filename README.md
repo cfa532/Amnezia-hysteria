@@ -26,6 +26,7 @@ This repository has three independent branches. Each represents a distinct archi
 | [docs/ios-setup.md](docs/ios-setup.md) | iPhone / iPad — direct AWG |
 | [docs/regional-lb-design.md](docs/regional-lb-design.md) | Architecture: shared keypair, DNS round-robin, provisioning API |
 | [docs/gen8-setup.md](docs/gen8-setup.md) | gen8 soft router — direct AWG to minipc; cross-strait lessons |
+| [docs/gen8-fec.md](docs/gen8-fec.md) | gen8↔minipc FEC (UDPspeeder) to cut cross-strait packet loss (~2–3× throughput) |
 | [docs/hysteria-legacy.md](docs/hysteria-legacy.md) | Retired Hysteria2 client/server how-to, kept for reference |
 
 ---

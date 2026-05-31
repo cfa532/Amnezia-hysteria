@@ -1,0 +1,21 @@
+# UDPspeeder FEC SERVER — runs on minipc (Taiwan).
+# Receives gen8's FEC-encoded AWG traffic on UDP 80 and forwards the recovered
+# stream to the local AmneziaWG server on 127.0.0.1:443. UDP 80 is used because
+# the cross-strait path blocks most UDP ports (4096/53/500/4500/8443/...) and
+# only passes 80 and 443; 443 is taken by AWG, so the FEC tunnel uses 80.
+# Install to /etc/systemd/system/ on minipc.
+[Unit]
+Description=UDPspeeder FEC server for gen8 cross-strait link
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/speederv2 -s -l0.0.0.0:80 -r127.0.0.1:443 -f10:10 -k morphous-fec-2026 --mode 0
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/udpspeeder-gen8.log
+StandardError=append:/var/log/udpspeeder-gen8.log
+
+[Install]
+WantedBy=multi-user.target

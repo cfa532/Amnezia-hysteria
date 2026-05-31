@@ -1,0 +1,10 @@
+#!/bin/bash
+# Revert gen8 AWG from the UDPspeeder FEC path back to direct minipc.
+# Installed on gen8 at /usr/local/sbin/gen8-fec-rollback.
+set -e
+sed -i 's|^Endpoint = .*|Endpoint = 125.229.161.122:443|' /etc/amnezia/amneziawg/wg-tahoe.setconf
+systemctl stop udpspeeder.service 2>/dev/null || true
+systemctl restart gen8-awg-tahoe.service
+sleep 3
+awg show wg-tahoe | grep -E 'endpoint|handshake'
+echo 'Reverted to direct AWG (125.229.161.122:443).'

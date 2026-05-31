@@ -17,3 +17,14 @@ algorithm (minus the wg-tahoe apply step) via
 to keep tn1's macOS provisioning list
 (`/etc/vpn-controller/split-allowed-ips-full.txt`) on the identical APNIC-derived
 set. Both currently yield ~11985 non-China IPv4 routes.
+
+## FEC layer (cross-strait packet-loss mitigation)
+
+The gen8 → minipc link is lossy; an FEC tunnel (UDPspeeder) recovers the loss and
+~2–3× throughput. See [../docs/gen8-fec.md](../docs/gen8-fec.md).
+
+- `udpspeeder-gen8.service` — FEC **server**, runs on **minipc** (UDP 80 → local AWG 443)
+- `udpspeeder.service` — FEC **client**, runs on **gen8** (127.0.0.1:4000 → minipc:80)
+- `gen8-fec-rollback` — revert gen8 to direct AWG (`/usr/local/sbin/` on gen8)
+
+Binary is `speederv2_amd64` from the wangyu-/UDPspeeder release (x86_64 both ends).

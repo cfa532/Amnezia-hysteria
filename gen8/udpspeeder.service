@@ -1,0 +1,19 @@
+# UDPspeeder FEC CLIENT — runs on the gen8 soft router.
+# Listens on 127.0.0.1:4000 (the AWG endpoint), FEC-encodes, and sends to the
+# minipc FEC server on UDP 80. gen8's wg-tahoe.setconf Endpoint must point at
+# 127.0.0.1:4000. Install to /etc/systemd/system/ on gen8.
+[Unit]
+Description=UDPspeeder FEC client to minipc (cross-strait AWG)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/speederv2 -c -l127.0.0.1:4000 -r125.229.161.122:80 -f10:10 -k morphous-fec-2026 --mode 0
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/udpspeeder.log
+StandardError=append:/var/log/udpspeeder.log
+
+[Install]
+WantedBy=multi-user.target
