@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VPN_USER="${VPN_USER:-vpncli}"
+VPN_TABLE="${VPN_TABLE:-112}"
+VPN_RULE_PRIORITY="${VPN_RULE_PRIORITY:-10012}"
+SOURCE_TABLE="${SOURCE_TABLE:-111}"
+MIN_ROUTE_COUNT="${MIN_ROUTE_COUNT:-10000}"
+REBUILD_WAIT_SECS="${REBUILD_WAIT_SECS:-3}"
+STATE_DIR="${STATE_DIR:-/var/lib/gen8-router/host-vpn}"
+ROUTE_BACKUP_FILE="${ROUTE_BACKUP_FILE:-$STATE_DIR/table-$SOURCE_TABLE.routes}"
+
+route_count_for_table() {
+  local table="$1"
+  local routes
+  routes="$(ip -4 route show table "$table" 2>/dev/null || true)"
+  printf '%s\n' "$routes" | sed '/^$/d' | wc -l | tr -d ' '
+}
+
+route_count_for_text() {
+  sed '/^$/d' | wc -l | tr -d ' '
+}
+
+routes_for_table() {
+  local table="$1"
+  ip -4 route show table "$table" 2>/dev/null || true
+}
+
+save_route_backup() {
+  local routes="$1"
+
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$routes" | sed '/^$/d' > "$ROUTE_BACKUP_FILE.tmp"
+  chmod 0644 "$ROUTE_BACKUP_FILE.tmp"
+  mv "$ROUTE_BACKUP_FILE.tmp" "$ROUTE_BACKUP_FILE"
+}
+
+fail() {
+  cat >&2 <<EOF
+chaos cannot enter VPN mode safely.
+
+Reason:
+  $*
+
+Expected:
+  source table $SOURCE_TABLE should contain the split VPN routes
+  host table $VPN_TABLE should be rebuilt from it
+  uid $uid ($VPN_USER) should route via table $VPN_TABLE
+  backup route snapshot should exist at $ROUTE_BACKUP_FILE
+
+Useful checks:
+  sudo systemctl status gen8-awg-tahoe.service gen8-ap-split-vpn.service --no-pager
+  sudo journalctl -u gen8-awg-tahoe.service -u gen8-ap-split-vpn.service -n 80 --no-pager
+  sudo ip route show table $SOURCE_TABLE | wc -l
+  sudo test -f $ROUTE_BACKUP_FILE && wc -l $ROUTE_BACKUP_FILE
+  sudo awg show wg-tahoe
+
+Manual recovery:
+  sudo systemctl restart gen8-awg-tahoe.service gen8-ap-split-vpn.service
+  sudo /usr/local/sbin/gen8-host-vpn-up
+EOF
+  exit 1
+}
+
+if ! id "$VPN_USER" >/dev/null 2>&1; then
+  useradd --system --create-home --shell /bin/bash --groups pi "$VPN_USER"
+fi
+
+uid="$(id -u "$VPN_USER")"
+
+if ! systemctl is-active --quiet gen8-ap-split-vpn.service; then
+  echo "chaos: gen8-ap-split-vpn.service is not active; restarting split VPN once..." >&2
+  systemctl restart gen8-awg-tahoe.service gen8-ap-split-vpn.service
+  sleep "$REBUILD_WAIT_SECS"
+fi
+
+if ! systemctl is-active --quiet gen8-ap-split-vpn.service; then
+  fail "gen8-ap-split-vpn.service is still not active after restart"
+fi
+
+if ! systemctl is-active --quiet gen8-doh-proxy.service; then
+  echo "chaos: gen8-doh-proxy.service is not active; restarting split VPN once..." >&2
+  systemctl restart gen8-ap-split-vpn.service
+  sleep "$REBUILD_WAIT_SECS"
+fi
+
+if ! systemctl is-active --quiet gen8-doh-proxy.service; then
+  fail "gen8-doh-proxy.service is still not active after restart"
+fi
+
+source_routes="$(routes_for_table "$SOURCE_TABLE")"
+source_route_count="$(printf '%s\n' "$source_routes" | route_count_for_text)"
+live_source_route_count="$source_route_count"
+if [ "${source_route_count:-0}" -le "$MIN_ROUTE_COUNT" ]; then
+  echo "chaos: source route table $SOURCE_TABLE has ${source_route_count:-0} routes; rebuilding split VPN once..." >&2
+  systemctl restart gen8-awg-tahoe.service gen8-ap-split-vpn.service
+  sleep "$REBUILD_WAIT_SECS"
+  source_routes="$(routes_for_table "$SOURCE_TABLE")"
+  source_route_count="$(printf '%s\n' "$source_routes" | route_count_for_text)"
+  live_source_route_count="$source_route_count"
+fi
+
+source_label="live table $SOURCE_TABLE"
+if [ "${source_route_count:-0}" -gt "$MIN_ROUTE_COUNT" ]; then
+  save_route_backup "$source_routes"
+elif [ -f "$ROUTE_BACKUP_FILE" ]; then
+  backup_routes="$(cat "$ROUTE_BACKUP_FILE")"
+  backup_route_count="$(printf '%s\n' "$backup_routes" | route_count_for_text)"
+  if [ "${backup_route_count:-0}" -gt "$MIN_ROUTE_COUNT" ]; then
+    source_routes="$backup_routes"
+    source_route_count="$backup_route_count"
+    source_label="backup snapshot $ROUTE_BACKUP_FILE"
+    echo "chaos: using backup route snapshot from $ROUTE_BACKUP_FILE (${backup_route_count} routes); live table $SOURCE_TABLE has ${live_source_route_count:-0} routes." >&2
+  fi
+fi
+
+if [ "${source_route_count:-0}" -le "$MIN_ROUTE_COUNT" ]; then
+  fail "source route table $SOURCE_TABLE is not ready after rebuild (${source_route_count:-0} routes), and no usable backup route snapshot is available"
+fi
+
+route_count="$(route_count_for_table "$VPN_TABLE")"
+if ip rule show | grep -q "^$VPN_RULE_PRIORITY:.*uidrange $uid-$uid lookup $VPN_TABLE" \
+  && [ "${route_count:-0}" -gt "$MIN_ROUTE_COUNT" ] \
+  && nft list table ip gen8_host_vpn >/dev/null 2>&1; then
+  echo "Host VPN mode already ready for user $VPN_USER uid $uid using table $VPN_TABLE."
+  exit 0
+fi
+
+ip rule del priority "$VPN_RULE_PRIORITY" 2>/dev/null || true
+ip -4 route flush table "$VPN_TABLE" 2>/dev/null || true
+
+printf '%s\n' "$source_routes" | while IFS= read -r route; do
+  [ -n "$route" ] && ip -4 route replace table "$VPN_TABLE" $route
+done
+ip -4 route replace blackhole default table "$VPN_TABLE" metric 427819
+ip rule add uidrange "$uid-$uid" priority "$VPN_RULE_PRIORITY" table "$VPN_TABLE"
+
+nft delete table ip gen8_host_vpn 2>/dev/null || true
+nft add table ip gen8_host_vpn
+nft 'add chain ip gen8_host_vpn output { type nat hook output priority dstnat; policy accept; }'
+nft 'add chain ip gen8_host_vpn postrouting { type nat hook postrouting priority srcnat; policy accept; }'
+nft add rule ip gen8_host_vpn output meta skuid "$uid" udp dport 53 redirect to :5353
+nft add rule ip gen8_host_vpn output meta skuid "$uid" tcp dport 53 redirect to :5353
+nft add rule ip gen8_host_vpn postrouting meta skuid "$uid" oifname "wg-tahoe" masquerade
+
+echo "Host VPN mode ready for user $VPN_USER uid $uid using table $VPN_TABLE from $source_label."
