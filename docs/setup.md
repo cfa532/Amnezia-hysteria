@@ -396,6 +396,19 @@ direct. The current mobile recommendation is:
   size limit.
 - IPv6: keep disabled in client `AllowedIPs` for the current environment.
 
+Follow-up testing on iOS showed that a tiny full-tunnel profile
+(`AllowedIPs = 0.0.0.0/1, 128.0.0.0/1` plus endpoint exclusion) can connect and
+handshake, but later hang. The AmneziaWG iOS log shows the route becoming
+`unsatisfied`, then `Connectivity offline, pausing backend`, followed by
+`temporaryShutdown`; the app may still display "connected" while traffic is
+dead. The reduced split profile (`ios1-split-mtu1180-keepalive10.conf`) did not
+show that failure in the same test window: routes stayed `satisfied`, handshake
+succeeded, and traffic counters moved.
+
+Do not use the temporary `ios1-full-test*` profiles as production iOS configs.
+Production mobile configs should use the reduced split list, `MTU = 1180`, DNS
+IPv4 only, and `PersistentKeepalive = 10`.
+
 ### macOS (additional machines)
 
 Use `amneziawg/mac-direct-template.conf`. Key difference from mobile: `AllowedIPs` uses split-route to avoid the macOS 26.5 sendmsg bug — `0.0.0.0/0` causes the VPN interface to become the default route before the handshake, breaking the handshake itself on some macOS versions.

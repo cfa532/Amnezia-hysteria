@@ -61,6 +61,7 @@ class ServerState:
     ip: str
     region: str
     max_peers: int
+    ssh_host: str = ""
     ssh_key: str = ""
     ssh_pass: str = ""
     ssh_user: str = "root"
@@ -78,7 +79,8 @@ class ServerState:
 def _ssh_args(server: ServerState) -> list[str]:
     base = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
             "-p", str(server.ssh_port)]
-    target = f"{server.ssh_user}@{server.ip}"
+    target_host = server.ssh_host or server.ip
+    target = f"{server.ssh_user}@{target_host}"
     if server.ssh_key:
         return ["ssh", "-i", server.ssh_key] + base + ["-o", "BatchMode=yes", target]
     elif server.ssh_pass:
@@ -99,7 +101,10 @@ def _ssh_check(server: ServerState) -> bool:
 def _count_active_peers(server: ServerState) -> int:
     """Count peers with a handshake within PEER_SESSION_WINDOW seconds."""
     try:
-        args = _ssh_args(server) + ["awg show awg0 dump"]
+        cmd = "awg show awg0 dump"
+        if server.ssh_user != "root":
+            cmd = f"sudo {cmd}"
+        args = _ssh_args(server) + [cmd]
         r = subprocess.run(args, capture_output=True, text=True, timeout=10)
         if r.returncode != 0:
             return 0
@@ -208,6 +213,7 @@ def run():
             ip=s["ip"],
             region=s.get("region", "default"),
             max_peers=s.get("max_peers", 50),
+            ssh_host=s.get("ssh_host", ""),
             ssh_key=s.get("ssh_key", ""),
             ssh_pass=s.get("ssh_pass", ""),
             ssh_user=s.get("ssh_user", "root"),

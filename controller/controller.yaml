@@ -1,6 +1,6 @@
 # VPN controller configuration
 # Deploy to /etc/vpn-controller/controller.yaml on the controller server.
-# Currently running on tn1 (43.165.128.251).
+# Currently running on av1 (Alibaba Tokyo, 47.79.87.68).
 
 dns:
   cf_api_token: "<CF_API_TOKEN>"
@@ -14,23 +14,25 @@ recover_threshold: 2     # consecutive successes before adding back to DNS
 
 regions:
   asia:
-    servers: [tn1, minipc]
+    servers: [av1, minipc]
 
 # Shared AWG identity — all servers use this same keypair.
 awg:
   shared_privkey: "<SHARED_AWG_PRIVATE_KEY>"
   shared_pubkey:  "<SHARED_AWG_PUBLIC_KEY>"
-  client_subnet:  "10.8.1.0/24"   # tn1 clients; minipc owns 10.8.0.0/24
+  client_subnet:  "10.8.1.0/24"
 
 servers:
-  - name: tn1
-    ip: "<TN1_IP>"
+  - name: av1
+    ip: "47.79.87.68"
     region: asia
     max_peers: 50
-    ssh_pass: "<ROOT_SSH_PASSWORD>"
+    ssh_host: 127.0.0.1
+    ssh_user: root
+    ssh_key: /etc/vpn-controller/av1-tokyo.pem
 
   - name: minipc
-    ip: "<MINIPC_IP>"
+    ip: "125.229.161.122"
     region: asia
     max_peers: 50
     ssh_user: pi

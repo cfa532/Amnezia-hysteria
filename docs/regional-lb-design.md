@@ -24,10 +24,10 @@ Client
 
 | Component | Host | Details |
 |-----------|------|---------|
-| DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, two A records (round-robin) |
-| VPN + Hysteria2 tn1 | 43.165.128.251 | region: tokyo, awg0 UDP 443, hysteria2 UDP 51820 |
-| VPN + Hysteria2 minipc | 125.229.161.122 | region: taiwan, awg0 UDP 443, hysteria2 UDP 51820 |
-| Health controller | tn1 (43.165.128.251) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
+| DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, av1 + minipc A records |
+| VPN av1 | 47.79.87.68 | Alibaba Tokyo, awg0 UDP 443 |
+| VPN minipc | 125.229.161.122 | Taiwan/home backup, awg0 UDP 443 |
+| Health controller | av1 (47.79.87.68) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
 
 **Decommissioned:** a1 (8.222.164.32, Singapore), tn2 (43.160.238.86, Singapore) — services stopped 2026-05-30
 
@@ -178,17 +178,19 @@ Provisioning steps:
 ```yaml
 regions:
   asia:
-    servers: [tn1, minipc]
+    servers: [av1, minipc]
 
 servers:
-  tn1:
-    ip: 43.165.128.251
-    region: tokyo
+  av1:
+    ip: 47.79.87.68
+    region: asia
     max_peers: 50
-    ssh_pass: <password>
+    ssh_host: 127.0.0.1
+    ssh_user: root
+    ssh_key: /etc/vpn-controller/av1-tokyo.pem
   minipc:
     ip: 125.229.161.122
-    region: taiwan
+    region: asia
     max_peers: 50
     ssh_user: pi
     ssh_port: 220
@@ -197,7 +199,7 @@ servers:
 awg:
   shared_privkey: <shared-awg-private-key>
   shared_pubkey: <shared-awg-public-key>
-  client_subnet: 10.8.1.0/24   # 10.8.0.0/24 is reserved for minipc platform users
+  client_subnet: 10.8.1.0/24
 ```
 
 **minipc sudoers** (`/etc/sudoers.d/vpn-controller`):
@@ -408,6 +410,13 @@ keeping them fast and avoiding breakage. Because mobile cannot run a route-pinne
 server IP inside a covered CIDR must also be excluded with a per-server CIDR split
 before the conf is distributed.
 
+2026-06-16 iOS testing also showed that a tiny full-tunnel diagnostic profile can
+handshake and pass traffic, then later hang when AmneziaWG iOS marks the route
+`unsatisfied` and enters `temporaryShutdown`. The app may still show "connected"
+after the backend has paused. Treat `ios*-full-test*` profiles as diagnostics
+only; production iOS/Android profiles should stay on the reduced split list with
+`MTU = 1180`, IPv4 DNS only, and `PersistentKeepalive = 10`.
+
 > **Do not confuse the two.** `split-allowed-ips.txt` is the *reduced (mobile)* list.
 > Applying it to a Mac silently downgrades that Mac's coverage. The full macOS list is
 > larger and is the honest non-China complement (generated via the
@@ -417,10 +426,12 @@ before the conf is distributed.
 
 | Server | IP | In AllowedIPs? | Action required |
 |--------|----|----------------|-----------------|
-| tn1 | 43.165.128.251 | No — excluded via CIDR split of `43.160.0.0/12` | None |
-| minipc | 125.229.161.122 | **Yes** — covered by `125.224.0.0/12` | iOS/Android confs need CIDR split for `125.229.161.0/24` |
+| av1 Alibaba Tokyo | 47.79.87.68 | No — current `ios1-split-mtu1180-keepalive10.conf` keeps the endpoint outside the tunnel | None for ios1 |
+| minipc | 125.229.161.122 | No — current `ios1-split-mtu1180-keepalive10.conf` keeps the endpoint outside the tunnel | None for ios1 |
 
-macOS clients are unaffected. iOS/Android clients connecting to minipc as their active server will experience a routing loop and handshake failure until `125.229.161.0/24` is split out of `125.224.0.0/12` in the iOS conf files.
+macOS clients are unaffected by server-IP coverage because they can run the
+route-pinner. iOS/Android clients cannot, so every active server IP must stay
+outside the mobile `AllowedIPs` list before configs are distributed.
 
 ### Updating the split lists
 

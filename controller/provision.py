@@ -82,7 +82,7 @@ def _ssh_args(server: dict) -> list[str]:
     port = str(server.get("ssh_port", 22))
     base = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
             "-p", port]
-    target = f"{user}@{server['ip']}"
+    target = f"{user}@{server.get('ssh_host') or server['ip']}"
     if server.get("ssh_key"):
         return (["ssh", "-i", server["ssh_key"]]
                 + base + ["-o", "BatchMode=yes", target])
@@ -327,18 +327,27 @@ def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
 
     endpoint = AWG_DIRECT_ENDPOINT
 
+    if os_type in {"ios", "android"}:
+        dns = "8.8.8.8"
+        mtu = "1180"
+        keepalive = "10"
+    else:
+        dns = "8.8.8.8, 1.1.1.1"
+        mtu = "1280"
+        keepalive = "25"
+
     return (
         f"[Interface]\n"
         f"PrivateKey = {privkey}\n"
         f"Address = {client_ip}/32\n"
-        f"DNS = 8.8.8.8, 1.1.1.1\n"
-        f"MTU = 1280\n"
+        f"DNS = {dns}\n"
+        f"MTU = {mtu}\n"
         f"{AWG_OBF}\n\n"
         f"[Peer]\n"
         f"PublicKey = {server_pubkey}\n"
         f"Endpoint = {endpoint}\n"
         f"AllowedIPs = {allowed}\n"
-        f"PersistentKeepalive = 25\n"
+        f"PersistentKeepalive = {keepalive}\n"
     )
 
 def make_servers_conf(servers: list[dict], hysteria_port: int = 51820) -> str:

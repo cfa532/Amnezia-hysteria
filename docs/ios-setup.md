@@ -38,9 +38,15 @@ In the AmneziaWG app, tap the tunnel → check the Peer section:
 |-------|---------------|
 | Endpoint | `nebuchadnezzar.fireshare.uk:443` |
 | Public Key | `AQgL8TfJomzJTcNxq/2mhKzgZfOp7eLuFEnsH0PDQhc=` |
-| AllowedIPs | `0.0.0.0/0, ::/0` (full) or a long IP list (split) |
+| AllowedIPs | Long IPv4 CIDR list (reduced split profile) |
+| MTU | `1180` |
+| PersistentKeepalive | `10` |
 
 If the endpoint shows `127.0.0.1:1443`, delete the tunnel and re-import — that is an old config.
+
+If the tunnel name contains `full-test`, delete it after testing. Those profiles
+were used only to isolate server/MTU behavior and are not stable production
+iPhone configs.
 
 ---
 
@@ -70,10 +76,25 @@ Run one test with the tunnel off and one with it on to measure actual overhead.
 
 | Mode | AllowedIPs | Effect |
 |------|-----------|--------|
-| Full | `0.0.0.0/0, ::/0` | All traffic through VPN |
-| Split | Long CIDR list | Chinese IPs bypass VPN; everything else goes through |
+| Split | Reduced long IPv4 CIDR list | Chinese IPs bypass VPN; everything else goes through |
+| Full test only | `0.0.0.0/1, 128.0.0.0/1` plus endpoint exclusion | Diagnostic only; can hang on iOS |
 
 Contact the admin to switch modes — this is set at provisioning time.
+
+### iOS full-tunnel hang discovered during testing
+
+The full-test profile can complete the initial handshake and even pass traffic,
+but later the iOS AmneziaWG backend may pause itself. The log pattern is:
+
+```text
+Network change detected with unsatisfied route
+Connectivity offline, pausing backend.
+Path update state: state=temporaryShutdown(...)
+```
+
+When this happens, the app can still show `connected`, but traffic is already
+dead. The reduced split profile avoids this route-monitor failure in current
+testing and should be used for iPhone/iPad.
 
 ---
 
@@ -83,12 +104,12 @@ Contact the admin to switch modes — this is set at provisioning time.
 
 1. **Wrong app** — confirm you are using AmneziaWG, not WireGuard. The WireGuard app won't work.
 2. **Old config** — if the endpoint is `127.0.0.1:1443`, delete and re-import the current `iosN.conf`.
-3. **Port blocked** — UDP 53 must be open in the cloud security group (Alibaba/Tencent console). Port 53 (DNS) is chosen because it is rarely blocked by home routers or ISPs; if you still time out on Wi-Fi, try cellular to confirm the server is up.
+3. **Port blocked** — UDP 443 must be open in the cloud security group (Alibaba/Tencent console). If you still time out on Wi-Fi, try cellular to confirm the server is up.
 
 ### Connected but no internet
 
-AllowedIPs `0.0.0.0/0` routes everything including DNS through the tunnel. If the tunnel is up but DNS fails, toggle the tunnel off and back on to let the DNS reset.
+If the tunnel is up but DNS fails, toggle the tunnel off and back on to let the DNS reset. Current iOS configs use IPv4 DNS only.
 
 ### Slow on cellular, fast on Wi-Fi
 
-Cellular UDP performance varies by carrier and location. Hysteria2 (used on macOS) is specifically tuned for lossy links; iOS uses raw AWG over UDP 53. This is inherent — no client-side fix.
+Cellular UDP performance varies by carrier and location. iOS uses raw AWG over UDP 443, so path quality matters.
