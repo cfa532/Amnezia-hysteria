@@ -39,7 +39,7 @@ retired for normal clients and kept only as historical reference.
 | Role | Host |
 |------|------|
 | DNS name | `nebuchadnezzar.fireshare.uk` |
-| Primary server | `av1` — Alibaba Tokyo, `8.211.174.30` |
+| Primary server | `av1` — Alibaba Tokyo, `47.245.61.67` |
 | Backup / second A record | `minipc` — `125.229.161.122` |
 | Controller host | `av1`, running `vpn-controller` and `vpn-provision` |
 
@@ -60,7 +60,7 @@ Client config policy:
 - macOS uses the honest full split list and the route-pinner, so server IPs do
   not need to be carved out of the macOS `AllowedIPs`.
 - Mobile configs must keep every active server IP outside `AllowedIPs`; current
-  configs keep both `8.211.174.30` and `125.229.161.122` outside the tunnel.
+  configs keep both `47.245.61.67` and `125.229.161.122` outside the tunnel.
 
 Root-level client `.conf` files are operational artifacts and are intentionally
 ignored by git. Regenerate or copy them locally when provisioning clients; do

@@ -1,6 +1,6 @@
 # VPN controller configuration
 # Deploy to /etc/vpn-controller/controller.yaml on the controller server.
-# Currently running on av1 (Alibaba Tokyo, 8.211.174.30).
+# Currently running on av1 (Alibaba Tokyo, 47.245.61.67).
 
 dns:
   cf_api_token: "<CF_API_TOKEN>"
@@ -24,7 +24,7 @@ awg:
 
 servers:
   - name: av1
-    ip: "8.211.174.30"
+    ip: "47.245.61.67"
     region: asia
     max_peers: 50
     ssh_host: 127.0.0.1

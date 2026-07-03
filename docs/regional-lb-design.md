@@ -24,9 +24,9 @@ Client
 | Component | Host | Details |
 |-----------|------|---------|
 | DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, av1 + minipc A records |
-| VPN av1 | 8.211.174.30 | Alibaba Tokyo, awg0 UDP 443 |
+| VPN av1 | 47.245.61.67 | Alibaba Tokyo, awg0 UDP 443 |
 | VPN minipc | 125.229.161.122 | Taiwan/home backup, awg0 UDP 443 |
-| Health controller | av1 (8.211.174.30) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
+| Health controller | av1 (47.245.61.67) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
 
 Public firewall/security-group policy: allow inbound `UDP 443` for AmneziaWG
 and `TCP 22` for SSH. Keep the provisioning/controller API private to `av1`.
@@ -186,7 +186,7 @@ regions:
 
 servers:
   av1:
-    ip: 8.211.174.30
+    ip: 47.245.61.67
     region: asia
     max_peers: 50
     ssh_host: 127.0.0.1
@@ -430,7 +430,7 @@ only; production iOS/Android profiles should stay on the reduced split list with
 
 | Server | IP | In AllowedIPs? | Action required |
 |--------|----|----------------|-----------------|
-| av1 Alibaba Tokyo | 8.211.174.30 | No — current mobile configs keep the endpoint outside the tunnel | None for iOS/Android |
+| av1 Alibaba Tokyo | 47.245.61.67 | No — current mobile configs keep the endpoint outside the tunnel | None for iOS/Android |
 | minipc | 125.229.161.122 | No — current mobile configs keep the endpoint outside the tunnel | None for iOS/Android |
 
 macOS clients are unaffected by server-IP coverage because they can run the
