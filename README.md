@@ -39,13 +39,19 @@ retired for normal clients and kept only as historical reference.
 | Role | Host |
 |------|------|
 | DNS name | `nebuchadnezzar.fireshare.uk` |
-| Primary server | `av1` — Alibaba Tokyo, `47.79.87.68` |
+| Primary server | `av1` — Alibaba Tokyo, `8.211.174.30` |
 | Backup / second A record | `minipc` — `125.229.161.122` |
 | Controller host | `av1`, running `vpn-controller` and `vpn-provision` |
 
 Cloudflare has A records for both `av1` and `minipc` with TTL 60. The
 controller on `av1` health-checks both servers and removes/restores DNS records
 as availability changes.
+
+Public firewall/security-group policy:
+
+- Allow inbound `UDP 443` for AmneziaWG.
+- Allow inbound `TCP 22` for SSH administration.
+- Do not expose the controller API publicly; it listens for local use on `av1`.
 
 Client config policy:
 
@@ -54,7 +60,7 @@ Client config policy:
 - macOS uses the honest full split list and the route-pinner, so server IPs do
   not need to be carved out of the macOS `AllowedIPs`.
 - Mobile configs must keep every active server IP outside `AllowedIPs`; current
-  configs keep both `47.79.87.68` and `125.229.161.122` outside the tunnel.
+  configs keep both `8.211.174.30` and `125.229.161.122` outside the tunnel.
 
 Root-level client `.conf` files are operational artifacts and are intentionally
 ignored by git. Regenerate or copy them locally when provisioning clients; do

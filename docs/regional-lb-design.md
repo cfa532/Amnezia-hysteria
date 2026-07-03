@@ -1,21 +1,20 @@
 # Full-Stack VPN — Architecture Design
 
 **Branch:** `full-stack`
-**Status:** Updated — 2026-05-30
+**Status:** Updated — 2026-07-03
 
 ---
 
 ## Overview
 
-Hysteria2 (QUIC/TLS transport) wraps AmneziaWG (obfuscated WireGuard VPN). The controller handles dynamic load balancing, health checking, DNS management, and client provisioning. Neither the controller nor Hysteria2 is in the data path once the tunnel is established.
+Clients connect to AmneziaWG directly on UDP 443. The controller handles dynamic load balancing, health checking, DNS management, and client provisioning, but it is not in the data path once the tunnel is established.
 
 ```
 Client
-  └─ AmneziaWG (endpoint: 127.0.0.1:1443)
-       └─ Hysteria2 (QUIC, masquerades as HTTPS)
-              └─ tn1:51820  or  minipc:51820  →  awg0:443
-                        │              │
-              nebuchadnezzar.fireshare.uk (Cloudflare DNS round-robin, TTL 60s)
+  └─ AmneziaWG / UDP 443
+       └─ nebuchadnezzar.fireshare.uk (Cloudflare DNS round-robin, TTL 60s)
+            ├─ av1 awg0:443
+            └─ minipc awg0:443
 ```
 
 ---
@@ -25,15 +24,18 @@ Client
 | Component | Host | Details |
 |-----------|------|---------|
 | DNS record | Cloudflare | `nebuchadnezzar.fireshare.uk`, TTL 60s, av1 + minipc A records |
-| VPN av1 | 47.79.87.68 | Alibaba Tokyo, awg0 UDP 443 |
+| VPN av1 | 8.211.174.30 | Alibaba Tokyo, awg0 UDP 443 |
 | VPN minipc | 125.229.161.122 | Taiwan/home backup, awg0 UDP 443 |
-| Health controller | av1 (47.79.87.68) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
+| Health controller | av1 (8.211.174.30) | `/opt/vpn-controller/health.py`, systemd `vpn-controller.service` |
+
+Public firewall/security-group policy: allow inbound `UDP 443` for AmneziaWG
+and `TCP 22` for SSH. Keep the provisioning/controller API private to `av1`.
 
 **Decommissioned:** a1 (8.222.164.32, Singapore), tn2 (43.160.238.86, Singapore) — services stopped 2026-05-30
 
 **minipc routing requirements** (non-obvious, will break silent if missing):
-- `iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o enp3s0 -j MASQUERADE` — NAT for tn1 subnet clients
-- `ip route add 10.8.1.0/24 dev awg0` — return path for tn1 clients (minipc's awg0 is 10.8.0.1/24, no auto-route for 10.8.1.x)
+- `iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o enp3s0 -j MASQUERADE` — NAT for av1 subnet clients
+- `ip route add 10.8.1.0/24 dev awg0` — return path for av1 clients (minipc's awg0 is 10.8.0.1/24, no auto-route for 10.8.1.x)
 - Both are in `/etc/amnezia/amneziawg/awg0.conf` PostUp/PostDown
 
 ---
@@ -52,7 +54,9 @@ Mobile clients use split-tunnel routing. AllowedIPs contains the full China IP l
 
 **macOS is not affected** — the route fix LaunchDaemon adds a static host route for the server IP via the physical interface, taking precedence over AWG routes. This is not possible on iOS/Android.
 
-**Current workaround:** Split the covering CIDR into sub-CIDRs that collectively exclude the server's `/24`. For example, `43.160.0.0/12` was split into 12 CIDRs to exclude `43.165.128.0/24` (tn1's block). This works but has a serious operational cost:
+**Current workaround:** Split or reduce the mobile AllowedIPs list so active
+server IPs remain outside the tunnel. This works but has a serious operational
+cost:
 
 - Every new server added in an Alibaba/Tencent IP range requires a new CIDR split.
 - Updated conf files must be redistributed to every mobile user (new QR code scan).
@@ -88,10 +92,10 @@ Clients draw IPs from per-network subnets. Server awg0 interfaces use `.1` of th
 | Block | Purpose |
 |-------|---------|
 | 10.8.0.0/24 | minipc (Taiwan) clients — managed by external platform |
-| 10.8.1.0/24 | tn1 (Tokyo) clients — assigned at provisioning |
-| 10.8.1.1 | tn1 awg0 interface |
+| 10.8.1.0/24 | av1 (Tokyo) clients — assigned at provisioning |
+| 10.8.1.1 | av1 awg0 interface |
 
-**Why two subnets:** minipc owns `10.8.0.0/24`; tn1 clients were moved to `10.8.1.0/24` to avoid IP conflicts. Since both servers share the same AWG keypair, tn1 clients are registered as peers on minipc (10.8.1.x/32 AllowedIPs), enabling one-way failover: tn1 clients can connect to minipc, but minipc clients cannot connect to tn1.
+**Why two subnets:** minipc owns `10.8.0.0/24`; av1 clients were moved to `10.8.1.0/24` to avoid IP conflicts. Since both servers share the same AWG keypair, av1 clients are registered as peers on minipc (10.8.1.x/32 AllowedIPs), enabling one-way failover: av1 clients can connect to minipc, but minipc clients cannot connect to av1.
 
 ### Peer registration on all servers
 
@@ -182,7 +186,7 @@ regions:
 
 servers:
   av1:
-    ip: 47.79.87.68
+    ip: 8.211.174.30
     region: asia
     max_peers: 50
     ssh_host: 127.0.0.1
@@ -225,7 +229,7 @@ H1 = 11223  H2 = 44556  H3 = 77889  H4 = 99001
 
 [Peer]
 PublicKey = <shared-awg-pubkey>             ← same for every server
-Endpoint = nebuchadnezzar.fireshare.uk:443  ← DNS round-robin to tn1/minipc
+Endpoint = nebuchadnezzar.fireshare.uk:443  ← DNS round-robin to av1/minipc
 AllowedIPs = <honest FULL non-China list (~11975 routes) — NOT the reduced split-allowed-ips.txt, which is the mobile list>
 PersistentKeepalive = 25
 ```
@@ -252,7 +256,7 @@ MTU = 1280
 
 [Peer]
 PublicKey = <shared-awg-pubkey>
-Endpoint = nebuchadnezzar.fireshare.uk:443   ← DNS round-robin to tn1/minipc
+Endpoint = nebuchadnezzar.fireshare.uk:443   ← DNS round-robin to av1/minipc
 AllowedIPs = <split-tunnel china CIDRs>
 PersistentKeepalive = 25
 ```
@@ -265,7 +269,7 @@ All clients (macOS, iOS, Android) fail over the same way — via DNS.
 
 ```
 Normal:
-  Client ──AWG / UDP 443──▶ nebuchadnezzar.fireshare.uk  (DNS round-robin: tn1 or minipc)
+  Client ──AWG / UDP 443──▶ nebuchadnezzar.fireshare.uk  (DNS round-robin: av1 or minipc)
                                 └─ awg0 (peer registered on both servers, shared keypair)
 
 One server goes down:
@@ -309,12 +313,12 @@ No client config changes. No code changes. Existing clients gain the new server 
        ssh_key: /etc/vpn-controller/newserver-key   # or ssh_pass
    regions:
      asia:
-       servers: [tn1, minipc, newserver]
+       servers: [av1, minipc, newserver]
    ```
 3. Add a DNS A record for `nebuchadnezzar.fireshare.uk` pointing to the new server IP (Cloudflare dashboard).
 4. Push all existing client peers to the new server — re-run provisioning for each client **or** manually sync the peer list:
    ```bash
-   # On tn1: copy peers from an existing server to the new one
+   # On av1: copy peers from an existing server to the new one
    awg showconf awg0 | grep -A3 "\[Peer\]" | \
      ssh root@<newserver-ip> "awg addconf awg0 /dev/stdin"
    ```
@@ -342,7 +346,7 @@ No client config changes. No code changes. Existing clients gain the new server 
 
 ### Add a user / device
 
-Run `reprovision.sh` on tn1:
+Run `reprovision.sh` on av1:
 ```bash
 export PROVISION_TOKEN=$(cat /etc/vpn-controller/api.token)
 bash /opt/vpn-controller/reprovision.sh <device_name> <os_type> <routing> /tmp/output
@@ -403,7 +407,7 @@ excluded: the `awg-en1-route` daemon resolves the endpoint hostname and installs
 host routes via en1 that take precedence over any matching AllowedIPs CIDR.
 
 **iOS/Android** use the reduced **Taobao-direct** list (`/etc/vpn-controller/split-allowed-ips.txt`
-on tn1, ~7798 routes). It is tailored two ways: (1) kept under 128 KB so the conf imports
+on av1, ~7798 routes). It is tailored two ways: (1) kept under 128 KB so the conf imports
 reliably via QR — iOS handshakes were unreliable with the 198 KB full list; and (2)
 curated so Taobao and other major Chinese apps route **direct** (outside the tunnel),
 keeping them fast and avoiding breakage. Because mobile cannot run a route-pinner, any
@@ -426,8 +430,8 @@ only; production iOS/Android profiles should stay on the reduced split list with
 
 | Server | IP | In AllowedIPs? | Action required |
 |--------|----|----------------|-----------------|
-| av1 Alibaba Tokyo | 47.79.87.68 | No — current `ios1-split-mtu1180-keepalive10.conf` keeps the endpoint outside the tunnel | None for ios1 |
-| minipc | 125.229.161.122 | No — current `ios1-split-mtu1180-keepalive10.conf` keeps the endpoint outside the tunnel | None for ios1 |
+| av1 Alibaba Tokyo | 8.211.174.30 | No — current mobile configs keep the endpoint outside the tunnel | None for iOS/Android |
+| minipc | 125.229.161.122 | No — current mobile configs keep the endpoint outside the tunnel | None for iOS/Android |
 
 macOS clients are unaffected by server-IP coverage because they can run the
 route-pinner. iOS/Android clients cannot, so every active server IP must stay
@@ -436,7 +440,7 @@ outside the mobile `AllowedIPs` list before configs are distributed.
 ### Updating the split lists
 
 The **reduced (mobile)** list lives at `/etc/vpn-controller/split-allowed-ips.txt` on
-tn1 (served by `provision.py`). The **full (macOS)** list is the honest non-China
+av1 (served by `provision.py`). The **full (macOS)** list is the honest non-China
 complement (~11975 routes); regenerate it with the procustodibus calculator from the
 current China CIDR set. **Do not** copy the reduced list onto a Mac.
 
@@ -471,15 +475,15 @@ current China CIDR set. **Do not** copy the reduced list onto a Mac.
 - [x] `controller/health.py` — SSH-based health loop, Cloudflare DNS state machine, active_peers + availability tracking
 - [x] `controller/provision.py` — FastAPI provisioning API, multi-server peer push, servers_conf generation; avoids `awg-quick save` corruption; handles root vs non-root servers
 - [x] `controller/deploy.sh` — install/update script for controller host
-- [x] `controller/vpn-controller.service` — systemd unit for health controller (running on tn1)
-- [x] `controller/vpn-provision.service` — systemd unit for provisioning API (running on tn1, port 9000)
+- [x] `controller/vpn-controller.service` — systemd unit for health controller (running on av1)
+- [x] `controller/vpn-provision.service` — systemd unit for provisioning API (running on av1, port 9000)
 - [x] `client/reprovision.sh` — admin-side provisioning script (outputs wg_config; servers.conf is legacy)
 - [x] `client/awg-en1-route.sh` — macOS route-pinner: resolves the endpoint hostname and pins each A record to en1 (replaces the retired `hysteria-udp-proxy.py`)
 - [x] `server/awg0-server.conf` — server awg0 config template
 - [x] `docs/macos-client-setup.md` — end-user import guide
-- [x] Shared AWG keypair deployed to tn1 and minipc
+- [x] Shared AWG keypair deployed to av1 and minipc
 - [x] Client IP pool: `10.8.1.0/24`; `10.8.0.0/24` reserved for minipc platform users
 - [x] Provisioning pushes peers to all servers (failover transparent)
-- [x] Region "asia" covering tn1 (Tokyo) + minipc (Taiwan)
+- [x] Region "asia" covering av1 (Tokyo) + minipc (Taiwan)
 - [x] minipc sudoers: `pi NOPASSWD: /usr/bin/awg, /usr/bin/awg-quick`
 - [x] All clients provisioned and tested: mac1 (10.8.1.2), mac2 (10.8.1.3), ios1–3 (10.8.1.4–6), android1–3 (10.8.1.7–9)
