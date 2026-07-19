@@ -43,6 +43,8 @@ When AmneziaWG activates, macOS clones a `/32` route for the endpoint IP onto th
 `utun` interface, which loops the tunnel's own packets and breaks the handshake.
 The `awg-en1-route` daemon resolves the endpoint hostname and re-pins each
 endpoint IP to the **physical** interface's gateway, so it bypasses utun.
+It reacts to route-table changes and also refreshes every 5 seconds, so DNS
+failover and stale cloned routes recover even if macOS stays otherwise quiet.
 
 ```bash
 # Install the daemon and script
@@ -57,6 +59,8 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/uk.fireshare.awg-en1-rout
 > edit `/Library/LaunchDaemons/uk.fireshare.awg-en1-route.plist` and add an
 > `EnvironmentVariables` dict with `AWG_ROUTE_IFACE` = `en0`. Check your active
 > interface with `route get default | awk '/interface:/{print $2}'`.
+> The refresh interval defaults to 5 seconds and can be changed with
+> `AWG_ROUTE_REFRESH_SECONDS` in the same `EnvironmentVariables` dict.
 
 ---
 

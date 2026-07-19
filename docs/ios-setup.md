@@ -10,6 +10,9 @@ AmneziaWG app ──UDP──▶ nebuchadnezzar.fireshare.uk:443
 
 iOS connects directly to the server on UDP port 443. There is no local Hysteria2 daemon — it is macOS-only.
 
+For the larger endpoint-assignment tradeoff behind iOS reconnect behavior, see
+[mobile-endpoint-strategy.md](mobile-endpoint-strategy.md).
+
 ---
 
 ## Prerequisites
@@ -109,6 +112,41 @@ testing and should be used for iPhone/iPad.
 ### Connected but no internet
 
 If the tunnel is up but DNS fails, toggle the tunnel off and back on to let the DNS reset. Current iOS configs use IPv4 DNS only.
+
+### Immediate reconnect fails after a silent drop
+
+iOS may keep the AmneziaWG backend in a temporary offline state after a path
+failure. Production iOS configs now use controller-managed sticky endpoints by
+default, so ordinary reprovisioning pins the profile to one selected server IP
+instead of the DNS round-robin name.
+
+On the controller, generate the normal sticky profile:
+
+```bash
+PROVISION_TOKEN='<BEARER_TOKEN>' ./reprovision.sh ios1 ios split /tmp
+```
+
+To force a specific server:
+
+```bash
+ENDPOINT=47.245.61.67:443 PROVISION_TOKEN='<BEARER_TOKEN>' \
+  ./reprovision.sh ios1 ios split /tmp
+```
+
+To keep a manual backup, provision two profile names so each one gets its own key
+and VPN IP:
+
+```bash
+ENDPOINT=47.245.61.67:443 PROVISION_TOKEN='<BEARER_TOKEN>' \
+  ./reprovision.sh ios1-av1 ios split /tmp
+
+ENDPOINT=125.229.161.122:443 PROVISION_TOKEN='<BEARER_TOKEN>' \
+  ./reprovision.sh ios1-minipc ios split /tmp
+```
+
+Import both on the iPhone and leave only one active at a time. Manual profile
+switching is less elegant than DNS failover, but it avoids the mobile cooldown
+path.
 
 ### Slow on cellular, fast on Wi-Fi
 

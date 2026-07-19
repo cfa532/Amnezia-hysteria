@@ -58,7 +58,7 @@ Two transport modes are supported depending on the client type:
   Internet (NAT via eth0)
 ```
 
-Mode B is used for mobile devices because Hysteria2 apps are unavailable in the China App Store. ISP/NAT only allows UDP 443, so awg0 must run on port 443. Both servers share the same awg0 private key so DNS round-robin is transparent to clients.
+Mode B is used for mobile devices because Hysteria2 apps are unavailable in the China App Store. ISP/NAT only allows UDP 443, so awg0 must run on port 443. Both servers share the same awg0 private key so clients can be migrated between backends without changing the server public key. Current production mobile profiles use controller-managed sticky endpoints rather than DNS round-robin by default.
 
 ---
 
@@ -419,14 +419,18 @@ Use `amneziawg/mac-direct-template.conf`. Key difference from mobile: `AllowedIP
 |--------|--------|
 | mac1 | 10.8.1.2 |
 | mac2 | 10.8.1.3 |
-| mac3 | 10.8.1.4 |
-| ios1 | 10.8.1.11 |
-| ios2 | 10.8.1.12 |
-| ios3 | 10.8.1.13 |
-| android1 | 10.8.1.14 |
-| android2 | 10.8.1.15 |
-| android3 | 10.8.1.16 |
-| Next device | 10.8.1.17, 10.8.1.18, ... |
+| ios1 | 10.8.1.4 |
+| ios2 | 10.8.1.5 |
+| ios3 | 10.8.1.6 |
+| android1 | 10.8.1.7 |
+| android2 | 10.8.1.8 |
+| android3 | 10.8.1.9 |
+| ios4 | 10.8.1.10 |
+| ios5 | 10.8.1.11 |
+| mac3 | 10.8.1.12 |
+| mac4 | 10.8.1.13 |
+| mac5 | 10.8.1.14 |
+| Next device | 10.8.1.15, 10.8.1.16, ... |
 
 **Subnet layout:** tn1 clients use `10.8.1.0/24` (server interface `10.8.1.1`). `10.8.0.0/24` is reserved for minipc (Taiwan) users managed by a separate platform.
 

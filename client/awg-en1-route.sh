@@ -13,6 +13,7 @@
 # Hysteria, which has been retired; renamed to end the confusion.)
 ENDPOINT_HOST="${ENDPOINT_HOST:-nebuchadnezzar.fireshare.uk}"
 IFACE="${AWG_ROUTE_IFACE:-en1}"
+REFRESH_SECONDS="${AWG_ROUTE_REFRESH_SECONDS:-5}"
 
 # Resolve the endpoint hostname to its current set of IPv4 A records.
 resolve_targets() {
@@ -57,6 +58,15 @@ fix_all() {
 }
 
 fix_all
+
+# React immediately to route changes, but also refresh on a short timer so DNS
+# failover and stale endpoint routes recover even while the route table is quiet.
+while true; do
+    sleep "$REFRESH_SECONDS"
+    fix_all
+done &
+refresh_pid=$!
+trap 'kill "$refresh_pid" 2>/dev/null' EXIT INT TERM
 
 /sbin/route monitor | while IFS= read -r _line; do
     fix_all

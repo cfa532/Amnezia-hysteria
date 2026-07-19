@@ -43,6 +43,8 @@ hostname's A records and pins each one to **en1's gateway**, so the tunnel alway
 egresses via the clean WiFi path — never utun, never en0. Because it reads the
 endpoint from DNS, it is **server-agnostic**: add, move, or remove a backend and
 the Mac adapts on the next route-table change, with no client edits.
+It also refreshes every 5 seconds, which catches DNS failover and stale cloned
+routes even when macOS does not emit another useful route event.
 
 ### Failover
 

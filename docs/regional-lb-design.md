@@ -42,6 +42,9 @@ and `TCP 22` for SSH. Keep the provisioning/controller API private to `av1`.
 
 ## Known Design Limitations
 
+For mobile endpoint assignment options and the iOS reconnect cooldown analysis,
+see [mobile-endpoint-strategy.md](mobile-endpoint-strategy.md).
+
 ### ⚠ iOS/Android routing loop when server IP falls inside AllowedIPs
 
 **Severity: High. Affects every mobile client whenever a new server is added.**
@@ -81,7 +84,10 @@ cost:
 
 ### Shared AWG keypair across all servers
 
-All servers share one AWG private/public key. This makes failover transparent: the client config has a single server pubkey and a single endpoint (`127.0.0.1:1443`). When Hysteria2 switches servers, the AWG handshake succeeds immediately — every server presents the same identity and every server has every client registered.
+All servers share one AWG private/public key. This makes failover transparent:
+the client config has a single server pubkey, and every server presents the same
+identity with every client registered. DNS round-robin clients can land on any
+healthy backend and still complete the AWG handshake.
 
 Without this, clients are permanently bound to one server's keypair and failover requires reprovisioning.
 
@@ -125,7 +131,11 @@ Each server runs:
 - `awg-quick@awg0` on UDP 443 (public — **all** clients connect here directly: iOS, Android, and macOS)
 - `hysteria.service` on UDP 51820 — **retired from the client path.** Still installed on the servers but no client uses it; macOS was migrated off the Hysteria2 proxy to direct AWG. See [hysteria-legacy.md](hysteria-legacy.md). (To be removed from the servers later.)
 
-All clients reach AWG directly on UDP 443 via `nebuchadnezzar.fireshare.uk` (DNS round-robin). All servers share the same AWG private key and peer list, so whichever IP DNS hands out, the handshake succeeds against the same identity.
+All clients reach AWG directly on UDP 443. macOS uses
+`nebuchadnezzar.fireshare.uk` DNS round-robin by default; iOS/Android use a
+controller-selected sticky server IP by default. All servers share the same AWG
+private key and peer list, so migrated clients can handshake against the same
+identity on any backend.
 
 ### 2. Regional Controller
 
@@ -147,7 +157,8 @@ Authorization: Bearer <token>
   "device_pubkey": "<client-generated-pubkey>",
   "device_privkey": "<client-generated-privkey>",
   "os_type": "macos",
-  "region": "asia"       ← optional, defaults to "asia"
+  "region": "asia",      ← optional, defaults to "asia"
+  "endpoint": "auto"     ← optional: mobile sticky IP, macOS DNS
 }
 
 → {
@@ -155,6 +166,7 @@ Authorization: Bearer <token>
   "server_name": "tn2",
   "server_pubkey": "<shared-awg-pubkey>",
   "client_ip": "10.8.1.3",
+  "endpoint": "nebuchadnezzar.fireshare.uk:443",
   "wg_config": "<complete .conf file contents>",
   "servers_conf": "<hysteria2 servers.conf contents>"
 }
@@ -167,15 +179,19 @@ Provisioning steps:
 4. Find candidates: servers in region where `is_healthy AND is_available`
 5. If no candidates: raise 503 "region at capacity"
 6. Pick least-loaded: `min(candidates, key=lambda s: (s.active_peers, s.provisioned_count))`
-7. Allocate unused IP from global client pool (`10.8.1.0/24`)
+7. Allocate unused IP from global client pool (`10.8.1.0/24`), or preserve the
+   existing IP for active reprovisioning
 8. Push peer to **all** servers via `awg set awg0 peer ... allowed-ips .../32 advanced-security on`
 9. Persist conf: root servers append peer block directly to `awg0.conf`; non-root servers run `awg-quick save awg0` (NOPASSWD in sudoers)
-10. Return complete tunnel config + `servers_conf`
+10. Resolve endpoint policy: `auto` pins iOS/Android to the selected server IP
+    and keeps macOS on DNS round-robin
+11. Return complete tunnel config + `servers_conf`
 
 **Load balancing:**
 - Strategy: least active peers among healthy + available servers in requested region
 - "Active peer" = peer with handshake within last 180s (WireGuard session window)
-- Session affinity: the preferred server in `servers_conf` is tried first by Hysteria2 failover; the client stays on it as long as it is reachable
+- Session affinity: mobile clients use a sticky endpoint by default; macOS uses
+  DNS round-robin plus the route-pinner
 
 ### 3. Controller Config (`controller.yaml`)
 
@@ -245,42 +261,53 @@ the client.
 > plus a `servers.conf`). That was retired — Hysteria tripled packet loss on the
 > cross-strait path. See [hysteria-legacy.md](hysteria-legacy.md).
 
-**iOS / Android** — single conf, connects directly to AWG on port 443 (no route-pinner — mobile can't run one, so server IPs must be excluded from AllowedIPs):
+**iOS / Android** — single conf, connects directly to AWG on port 443. Mobile
+uses a sticky endpoint by default because iOS reconnects are more predictable
+when DNS round-robin is not in the retry path. Mobile cannot run a route-pinner,
+so server IPs must be excluded from AllowedIPs:
 ```ini
 [Interface]
 PrivateKey = <client-private-key>
 Address = 10.8.1.4/32
-DNS = 8.8.8.8, 1.1.1.1
-MTU = 1280
+DNS = 8.8.8.8
+MTU = 1180
 ...obfuscation params...
 
 [Peer]
 PublicKey = <shared-awg-pubkey>
-Endpoint = nebuchadnezzar.fireshare.uk:443   ← DNS round-robin to av1/minipc
-AllowedIPs = <split-tunnel china CIDRs>
-PersistentKeepalive = 25
+Endpoint = 47.245.61.67:443   ← selected sticky server IP
+AllowedIPs = <reduced mobile split CIDRs with active server IPs excluded>
+PersistentKeepalive = 10
 ```
 
 ---
 
 ## Failover Flow
 
-All clients (macOS, iOS, Android) fail over the same way — via DNS.
+macOS and mobile clients now fail over differently by default.
 
 ```
-Normal:
-  Client ──AWG / UDP 443──▶ nebuchadnezzar.fireshare.uk  (DNS round-robin: av1 or minipc)
-                                └─ awg0 (peer registered on both servers, shared keypair)
+macOS normal:
+  Mac ──AWG / UDP 443──▶ nebuchadnezzar.fireshare.uk  (DNS round-robin: av1 or minipc)
+                              └─ awg0 (peer registered on both servers, shared keypair)
 
 One server goes down:
   ├── health.py detects failure (3 consecutive SSH checks)
   ├── Removes the dead server's A record from nebuchadnezzar.fireshare.uk (TTL 60s)
-  ├── Client re-resolves on its next handshake → lands on the surviving server
+  ├── Mac re-resolves on its next handshake → lands on the surviving server
   └── AWG handshake succeeds immediately (shared keypair, peer on both servers)
       Tunnel restored — no reprovisioning, no admin action
 
 macOS: the awg-en1-route daemon re-pins whatever IP DNS now returns, so the new
 endpoint still egresses via en1.
+
+Mobile normal:
+  iOS/Android ──AWG / UDP 443──▶ assigned-server-ip:443
+
+Mobile server failure:
+  ├── health.py removes failed server from new assignments
+  ├── affected clients need managed reprovisioning or a backup pinned profile
+  └── peer-on-all-servers means migration only changes the client endpoint/key
 ```
 
 ---
@@ -292,7 +319,8 @@ Adding a new region requires only:
 2. Add server to `controller.yaml` under new region
 3. Push all existing client peers to new server
 
-No client config changes. No code changes. Existing clients gain the new server as a cross-region fallback automatically.
+macOS clients can gain the new server as a DNS fallback automatically. Mobile
+clients keep their sticky endpoint until managed migration or reprovisioning.
 
 ---
 
@@ -315,7 +343,9 @@ No client config changes. No code changes. Existing clients gain the new server 
      asia:
        servers: [av1, minipc, newserver]
    ```
-3. Add a DNS A record for `nebuchadnezzar.fireshare.uk` pointing to the new server IP (Cloudflare dashboard).
+3. Add a DNS A record for `nebuchadnezzar.fireshare.uk` pointing to the new
+   server IP if macOS clients should use it through DNS round-robin. Mobile
+   clients will use it only for new sticky assignments or managed migrations.
 4. Push all existing client peers to the new server — re-run provisioning for each client **or** manually sync the peer list:
    ```bash
    # On av1: copy peers from an existing server to the new one
@@ -331,7 +361,12 @@ No client config changes. No code changes. Existing clients gain the new server 
    <user> ALL=(ALL) NOPASSWD: /usr/bin/awg, /usr/bin/awg-quick
    ```
 
-**macOS clients pick up the new server automatically** once its A record is added — the `awg-en1-route` daemon re-resolves the endpoint hostname and pins the new IP; no reprovision needed. **iOS/Android** also fail over via DNS, but if the new server's IP falls inside their AllowedIPs split list it must be excluded first (they have no route-pinner) — see [Known Design Limitations](#-iosandroid-routing-loop-when-server-ip-falls-inside-allowedips).
+**macOS clients pick up the new server automatically** once its A record is added
+— the `awg-en1-route` daemon re-resolves the endpoint hostname and pins the new
+IP; no reprovision needed. **iOS/Android** use sticky endpoints by default, so
+they will not use the new server until new assignment or managed migration. If a
+mobile endpoint IP falls inside their AllowedIPs split list it must be excluded
+first (they have no route-pinner) — see [Known Design Limitations](#-iosandroid-routing-loop-when-server-ip-falls-inside-allowedips).
 
 ---
 
@@ -486,4 +521,5 @@ current China CIDR set. **Do not** copy the reduced list onto a Mac.
 - [x] Provisioning pushes peers to all servers (failover transparent)
 - [x] Region "asia" covering av1 (Tokyo) + minipc (Taiwan)
 - [x] minipc sudoers: `pi NOPASSWD: /usr/bin/awg, /usr/bin/awg-quick`
-- [x] All clients provisioned and tested: mac1 (10.8.1.2), mac2 (10.8.1.3), ios1–3 (10.8.1.4–6), android1–3 (10.8.1.7–9)
+- [x] Existing tested clients: mac1 (10.8.1.2), mac2 (10.8.1.3), ios1–3 (10.8.1.4–6), android1–3 (10.8.1.7–9)
+- [ ] Apply generated server peer blocks for mac3–mac5 (10.8.1.12–14) to all AWG servers

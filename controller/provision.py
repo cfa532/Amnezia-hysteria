@@ -9,8 +9,8 @@ DELETE /clients/{device_name} — revoke client (removes peer from all servers)
 Server health and active_peers are read from /var/run/vpn-health.json,
 written every 30s by health.py. No duplicate SSH health checks at provision time.
 
-Peer registration is pushed to ALL servers so that Hysteria2 failover is
-transparent — the client works regardless of which server Hysteria2 routes to.
+Peer registration is pushed to ALL servers so DNS failover, sticky mobile
+migration, and emergency reprovisioning can all land on any healthy backend.
 """
 
 import ipaddress
@@ -166,10 +166,13 @@ def _provisioned_count(server_name: str, state: dict) -> int:
     return sum(1 for c in state["clients"].values()
                if c.get("preferred_server") == server_name and c.get("active"))
 
+def _server_names_in_region(region: str, cfg: dict) -> set[str]:
+    return set(cfg.get("regions", {}).get(region, {}).get("servers", []))
+
 def _available_in_region(region: str, cfg: dict, health: dict,
                           state: dict) -> list[dict]:
     """Return config server dicts that are healthy + available in the given region."""
-    region_names = set(cfg.get("regions", {}).get(region, {}).get("servers", []))
+    region_names = _server_names_in_region(region, cfg)
     result = []
     for s in cfg["servers"]:
         if s["name"] not in region_names:
@@ -187,6 +190,13 @@ def _least_loaded(servers: list[dict]) -> dict:
     # Primary sort: live active peers (health state, updates every 30s)
     # Tiebreaker: provisioned client count (clients.json, updates immediately)
     return min(servers, key=lambda s: (s["_active_peers"], s["_provisioned"]))
+
+def _sticky_server(old_client: dict | None, candidates: list[dict]) -> dict | None:
+    """Return the previous preferred server if it is still a valid candidate."""
+    if not old_client:
+        return None
+    old_name = old_client.get("preferred_server")
+    return next((s for s in candidates if s["name"] == old_name), None)
 
 
 # ── IP allocation (global pool) ────────────────────────────────────────────────
@@ -305,10 +315,13 @@ def _normalize_routing(routing: str) -> str:
 
 # All clients connect to AWG directly on UDP 443 (Hysteria2 transport retired).
 AWG_DIRECT_ENDPOINT = "nebuchadnezzar.fireshare.uk:443"
+AWG_DIRECT_PORT = 443
+MOBILE_OS_TYPES = {"ios", "android"}
 
 def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
                    os_type: str, routing: str = "split",
-                   server_ips: list[str] | None = None) -> str:
+                   server_ips: list[str] | None = None,
+                   endpoint: str = AWG_DIRECT_ENDPOINT) -> str:
     os_type = _normalize_os_type(os_type)
     routing = _normalize_routing(routing)
     server_ips = server_ips or []
@@ -324,8 +337,6 @@ def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
         # iOS/Android: reduced Taobao-direct list, with server /24s carved out
         # (no route-pinner on mobile, so a covered server IP would loop).
         allowed = _exclude_servers(_split_allowed_ips(), server_ips)
-
-    endpoint = AWG_DIRECT_ENDPOINT
 
     if os_type in {"ios", "android"}:
         dns = "8.8.8.8"
@@ -349,6 +360,24 @@ def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
         f"AllowedIPs = {allowed}\n"
         f"PersistentKeepalive = {keepalive}\n"
     )
+
+def _normalize_endpoint_policy(endpoint: str) -> str:
+    normalized = (endpoint or "auto").strip()
+    return normalized or "auto"
+
+def _endpoint_for_request(endpoint: str, preferred: dict, os_type: str) -> str:
+    """Return the endpoint to write into the generated client config."""
+    normalized = _normalize_endpoint_policy(endpoint)
+    if normalized == "auto":
+        return (f"{preferred['ip']}:{AWG_DIRECT_PORT}"
+                if os_type in MOBILE_OS_TYPES else AWG_DIRECT_ENDPOINT)
+    if normalized == "dns":
+        return AWG_DIRECT_ENDPOINT
+    if normalized == "preferred":
+        return f"{preferred['ip']}:{AWG_DIRECT_PORT}"
+    if ":" in normalized:
+        return normalized
+    return f"{normalized}:{AWG_DIRECT_PORT}"
 
 def make_servers_conf(servers: list[dict], hysteria_port: int = 51820) -> str:
     """Generate Hysteria2 servers.conf — same list for all clients in a region."""
@@ -378,12 +407,14 @@ class ProvisionRequest(BaseModel):
     os_type: str = "macos"    # "macos" | "ios" | "android"
     region: str = "asia"
     routing: str = "full"     # "full" (all traffic) | "split" (exclude CN IPs)
+    endpoint: str = "auto"    # "auto" | "dns" | "preferred" | "host-or-ip[:port]"
 
 class ProvisionResponse(BaseModel):
     device_name: str
     server_name: str
     server_pubkey: str
     client_ip: str
+    endpoint: str
     wg_config: str
     servers_conf: str
 
@@ -399,14 +430,16 @@ def provision(req: ProvisionRequest,
     health = load_health()
     os_type = _normalize_os_type(req.os_type)
     routing = _normalize_routing(req.routing)
+    endpoint_policy = _normalize_endpoint_policy(req.endpoint)
+    old_client = state["clients"].get(req.device_name)
+    old_active = bool(old_client and old_client.get("active"))
 
     # Revoke existing assignment — remove peer from every server
-    if req.device_name in state["clients"]:
-        old = state["clients"][req.device_name]
-        if old["active"]:
+    if old_client:
+        if old_active:
             for s in cfg["servers"]:
                 try:
-                    ssh_awg_remove(s, old["device_pubkey"])
+                    ssh_awg_remove(s, old_client["device_pubkey"])
                 except Exception as e:
                     log.warning(f"Could not remove old peer from {s['name']}: {e}")
         state["clients"][req.device_name]["active"] = False
@@ -416,13 +449,15 @@ def provision(req: ProvisionRequest,
     if not candidates:
         raise HTTPException(status_code=503,
                             detail=f"No servers available in region '{req.region}'")
-    preferred = _least_loaded(candidates)
+    sticky = (_sticky_server(old_client, candidates)
+              if endpoint_policy == "auto" and os_type in MOBILE_OS_TYPES else None)
+    preferred = sticky or _least_loaded(candidates)
 
     shared_pubkey = cfg["awg"]["shared_pubkey"]
-    client_ip = allocate_ip(cfg, state)
+    client_ip = old_client["client_ip"] if old_active else allocate_ip(cfg, state)
 
-    # Push peer to ALL servers — failover works regardless of which server
-    # Hysteria2 routes to
+    # Push peer to ALL servers so DNS failover and mobile migration can land on
+    # any healthy backend without another server-side peer edit.
     errors = []
     for s in cfg["servers"]:
         try:
@@ -434,11 +469,15 @@ def provision(req: ProvisionRequest,
         log.warning(f"Peer push failed on: {errors} — failover to these servers"
                     f" will not work until resolved")
 
+    endpoint = _endpoint_for_request(endpoint_policy, preferred, os_type)
+
     # Persist
     state["clients"][req.device_name] = {
         "device_pubkey":    req.device_pubkey,
         "preferred_server": preferred["name"],
         "client_ip":        client_ip,
+        "endpoint":         endpoint,
+        "endpoint_policy":  endpoint_policy,
         "region":           req.region,
         "os_type":          os_type,
         "routing":          routing,
@@ -449,17 +488,19 @@ def provision(req: ProvisionRequest,
 
     wg_config    = make_wg_config(req.device_privkey, client_ip,
                                    shared_pubkey, os_type, routing,
-                                   server_ips=[s["ip"] for s in cfg["servers"]])
+                                   server_ips=[s["ip"] for s in cfg["servers"]],
+                                   endpoint=endpoint)
     servers_conf = make_servers_conf(cfg["servers"])
 
     log.info(f"Provisioned {req.device_name} → preferred={preferred['name']}"
-             f" ip={client_ip} region={req.region}")
+             f" ip={client_ip} region={req.region} endpoint={endpoint}")
 
     return ProvisionResponse(
         device_name=req.device_name,
         server_name=preferred["name"],
         server_pubkey=shared_pubkey,
         client_ip=client_ip,
+        endpoint=endpoint,
         wg_config=wg_config,
         servers_conf=servers_conf,
     )

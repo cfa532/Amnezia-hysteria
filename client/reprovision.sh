@@ -7,6 +7,12 @@
 #   routing:     full | split            (default: split)
 #   output_dir:  where to write output files  (default: ~/Documents/Gen8)
 #
+# Optional environment:
+#   ENDPOINT=auto       mobile pins to selected server, macOS uses DNS (default)
+#   ENDPOINT=dns        use DNS round-robin endpoint
+#   ENDPOINT=preferred  pin config to the selected healthy server IP
+#   ENDPOINT=IP[:PORT]  pin config to an explicit endpoint
+#
 # macOS output: <device_name>.conf  (AWG config)
 #               servers.conf        (Hysteria2 server list — macOS only)
 # iOS/Android:  <device_name>.conf  (AWG config)
@@ -23,6 +29,7 @@ OS_TYPE=${2:-macos}
 ROUTING=${3:-split}
 OUTPUT_DIR=${4:-~/Documents/Gen8}
 REGION=${REGION:-asia}
+ENDPOINT=${ENDPOINT:-auto}
 
 ENV_FILE=~/.vpn-provision.env
 [ -f "$ENV_FILE" ] && source "$ENV_FILE"
@@ -38,12 +45,13 @@ echo "Device:  $DEVICE_NAME"
 echo "OS type: $OS_TYPE"
 echo "Routing: $ROUTING"
 echo "Region:  $REGION"
+echo "Endpoint: $ENDPOINT"
 echo "Pubkey:  $PUB"
 
 RESPONSE=$(curl -sf -X POST "$PROVISION_URL/provision" \
     -H "Authorization: Bearer $PROVISION_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"device_name\":\"$DEVICE_NAME\",\"device_pubkey\":\"$PUB\",\"device_privkey\":\"$PRIV\",\"os_type\":\"$OS_TYPE\",\"routing\":\"$ROUTING\",\"region\":\"$REGION\"}")
+    -d "{\"device_name\":\"$DEVICE_NAME\",\"device_pubkey\":\"$PUB\",\"device_privkey\":\"$PRIV\",\"os_type\":\"$OS_TYPE\",\"routing\":\"$ROUTING\",\"region\":\"$REGION\",\"endpoint\":\"$ENDPOINT\"}")
 
 echo "$RESPONSE" | python3 -m json.tool
 
@@ -66,4 +74,4 @@ print(data['servers_conf'])
     echo "servers.conf written to ${OUTPUT_DIR}/servers.conf"
 fi
 
-echo "Assigned to: $(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['server_name'], d['client_ip'])")"
+echo "Assigned to: $(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['server_name'], d['client_ip'], d['endpoint'])")"

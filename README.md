@@ -24,6 +24,7 @@ This repository has three independent branches. Each represents a distinct archi
 | [docs/dual-nic-setup.md](docs/dual-nic-setup.md) | Set up a dual-NIC Mac (mac1/Sequoia, mac2/Tahoe) — direct AWG over en1 |
 | [docs/tahoe-setup.md](docs/tahoe-setup.md) | Tahoe (mac2) — pointer to the dual-NIC guide |
 | [docs/ios-setup.md](docs/ios-setup.md) | iPhone / iPad — direct AWG |
+| [docs/mobile-endpoint-strategy.md](docs/mobile-endpoint-strategy.md) | Design note: DNS round-robin vs sticky endpoints for mobile clients |
 | [docs/regional-lb-design.md](docs/regional-lb-design.md) | Architecture: shared keypair, DNS round-robin, provisioning API |
 | [docs/gen8-setup.md](docs/gen8-setup.md) | gen8 soft router — direct AWG to minipc; cross-strait lessons |
 | [docs/gen8-fec.md](docs/gen8-fec.md) | gen8↔minipc FEC (UDPspeeder) to cut cross-strait packet loss (~2–3× throughput) |
@@ -56,7 +57,7 @@ Public firewall/security-group policy:
 Client config policy:
 
 - iOS/Android use the reduced mobile split list, `DNS = 8.8.8.8`, `MTU = 1180`,
-  and `PersistentKeepalive = 10`.
+  `PersistentKeepalive = 10`, and a controller-assigned sticky server endpoint.
 - macOS uses the honest full split list and the route-pinner, so server IPs do
   not need to be carved out of the macOS `AllowedIPs`.
 - Mobile configs must keep every active server IP outside `AllowedIPs`; current
