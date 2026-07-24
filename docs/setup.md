@@ -427,10 +427,8 @@ Use `amneziawg/mac-direct-template.conf`. Key difference from mobile: `AllowedIP
 | android3 | 10.8.1.9 |
 | ios4 | 10.8.1.10 |
 | ios5 | 10.8.1.11 |
-| mac3 | 10.8.1.12 |
-| mac4 | 10.8.1.13 |
-| mac5 | 10.8.1.14 |
-| Next device | 10.8.1.15, 10.8.1.16, ... |
+| android4-ge | 10.8.1.12 |
+| Next device | 10.8.1.13, 10.8.1.14, ... |
 
 **Subnet layout:** tn1 clients use `10.8.1.0/24` (server interface `10.8.1.1`). `10.8.0.0/24` is reserved for minipc (Taiwan) users managed by a separate platform.
 

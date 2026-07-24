@@ -522,4 +522,3 @@ current China CIDR set. **Do not** copy the reduced list onto a Mac.
 - [x] Region "asia" covering av1 (Tokyo) + minipc (Taiwan)
 - [x] minipc sudoers: `pi NOPASSWD: /usr/bin/awg, /usr/bin/awg-quick`
 - [x] Existing tested clients: mac1 (10.8.1.2), mac2 (10.8.1.3), ios1–3 (10.8.1.4–6), android1–3 (10.8.1.7–9)
-- [ ] Apply generated server peer blocks for mac3–mac5 (10.8.1.12–14) to all AWG servers
