@@ -62,6 +62,18 @@ gen8-hysteria-proxy.service  disabled
 
 ---
 
+## SSH protection
+
+gen8's SSH daemon listens on TCP 22 and 220, but direct WAN TCP 22 is dropped
+by the `gen8_ssh_guard` nftables table. WAN TCP 220 is rate-limited. Fail2ban
+adds authentication-aware protection on both listeners: five failures in ten
+minutes trigger a one-hour ban, with repeat bans increasing to one day.
+
+See [SSH protection — gen8 and minipc](ssh-protection.md) for the deployed
+policy, trusted networks, configuration source, and recovery commands.
+
+---
+
 ## Peer registration
 
 gen8's peer must be registered **only on minipc**, not tn1:

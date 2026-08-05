@@ -1,0 +1,15 @@
+[DEFAULT]
+# Keep trusted management paths from being banned.
+ignoreip = 127.0.0.1/8 ::1 192.168.5.0/24 100.86.9.125/32 47.245.61.67/32
+
+# Escalate repeat bans while keeping the first ban recoverable.
+bantime = 1h
+findtime = 10m
+maxretry = 5
+bantime.increment = true
+bantime.maxtime = 1d
+
+[sshd]
+enabled = true
+backend = systemd
+port = 22
