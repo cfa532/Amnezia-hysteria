@@ -41,9 +41,19 @@ In the AmneziaWG app, tap the tunnel → check the Peer section:
 |-------|---------------|
 | Endpoint | `nebuchadnezzar.fireshare.uk:443` |
 | Public Key | `AQgL8TfJomzJTcNxq/2mhKzgZfOp7eLuFEnsH0PDQhc=` |
-| AllowedIPs | Long IPv4 CIDR list (reduced split profile) |
+| AllowedIPs | IPv4 firm-bypass complement (entire config ≤ 32 KiB) |
 | MTU | `1180` |
 | PersistentKeepalive | `10` |
+
+Provisioning creates two import choices:
+
+- `iosN.conf`: broader major-app coverage, capped at 32 KiB; transfer this file
+  directly when practical.
+- `iosN-qr.conf` and `iosN-qr.png`: priority coverage for WeChat, Taobao and
+  Douyin, with the complete config capped at 2000 bytes for reliable scanning.
+
+These profiles share one key and tunnel address. Import the profile appropriate
+for the device and do not enable both profiles at the same time.
 
 If the endpoint shows `127.0.0.1:1443`, delete the tunnel and re-import — that is an old config.
 
@@ -79,7 +89,8 @@ Run one test with the tunnel off and one with it on to measure actual overhead.
 
 | Mode | AllowedIPs | Effect |
 |------|-----------|--------|
-| Split | Reduced long IPv4 CIDR list | Chinese IPs bypass VPN; everything else goes through |
+| Split file | Firm-bypass IPv4 complement | Major Chinese apps direct; all other public IPv4 through VPN; ≤ 32 KiB |
+| Split QR | Priority IPv4 complement | WeChat, Taobao and Douyin direct; all other public IPv4 through VPN; ≤ 2000 bytes |
 | Full test only | `0.0.0.0/1, 128.0.0.0/1` plus endpoint exclusion | Diagnostic only; can hang on iOS |
 
 Contact the admin to switch modes — this is set at provisioning time.
@@ -96,8 +107,7 @@ Path update state: state=temporaryShutdown(...)
 ```
 
 When this happens, the app can still show `connected`, but traffic is already
-dead. The reduced split profile avoids this route-monitor failure in current
-testing and should be used for iPhone/iPad.
+dead. Production profiles use the bounded firm-bypass split mode instead.
 
 ---
 

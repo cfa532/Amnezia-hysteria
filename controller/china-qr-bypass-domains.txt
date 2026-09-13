@@ -1,0 +1,25 @@
+# Priority mainland services for the <= 2000-byte mobile QR profile.
+# Keep this deliberately small. DNS observations are widened as necessary by
+# provision.py so the complete AmneziaWG configuration remains QR-safe.
+
+# WeChat
+weixin.qq.com
+res.wx.qq.com
+weixin110.qq.com
+qpic.cn
+qlogo.cn
+gtimg.com
+
+# Taobao / Tmall
+taobao.com
+www.taobao.com
+tmall.com
+alicdn.com
+tbcdn.cn
+
+# Douyin
+douyin.com
+iesdouyin.com
+byteimg.com
+douyinvod.com
+douyinpic.com

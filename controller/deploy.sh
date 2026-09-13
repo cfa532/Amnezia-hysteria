@@ -12,20 +12,31 @@ set -euo pipefail
 
 CTRL_DIR=/etc/vpn-controller
 INSTALL_DIR=/opt/vpn-controller
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 # ── 1. Install deps ───────────────────────────────────────────────────────────
 log "Installing system deps..."
-apt-get install -y python3-pip sshpass -q
+apt-get install -y python3-pip sshpass dnsutils -q
 python3 -m pip install fastapi uvicorn pyyaml --break-system-packages -q
 
 # ── 2. Install source files ───────────────────────────────────────────────────
 log "Installing controller files..."
 mkdir -p "$INSTALL_DIR"
 cp "$INSTALL_DIR/provision.py" "$INSTALL_DIR/provision.py.bak" 2>/dev/null || true
-cp provision.py health.py reprovision.sh "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/reprovision.sh"
+cp "$SCRIPT_DIR/provision.py" "$SCRIPT_DIR/health.py" \
+    "$SCRIPT_DIR/update-china-firm-bypass.py" "$INSTALL_DIR/"
+install -m 0755 "$SCRIPT_DIR/../client/reprovision.sh" \
+    "$INSTALL_DIR/reprovision.sh"
+install -m 0644 "$SCRIPT_DIR/china-firm-bypass-domains.txt" \
+    "$CTRL_DIR/china-firm-bypass-domains.txt"
+install -m 0644 "$SCRIPT_DIR/china-firm-bypass-static-cidrs.txt" \
+    "$CTRL_DIR/china-firm-bypass-static-cidrs.txt"
+install -m 0644 "$SCRIPT_DIR/china-qr-bypass-domains.txt" \
+    "$CTRL_DIR/china-qr-bypass-domains.txt"
+install -m 0644 "$SCRIPT_DIR/china-qr-bypass-static-cidrs.txt" \
+    "$CTRL_DIR/china-qr-bypass-static-cidrs.txt"
 
 # ── 3. Generate API token if missing ─────────────────────────────────────────
 if [ ! -f "$CTRL_DIR/api.token" ]; then
@@ -72,10 +83,18 @@ RestartSec=5
 WantedBy=multi-user.target
 SVC
 
+install -m 0644 "$SCRIPT_DIR/vpn-update-china-firm-bypass.service" \
+    /etc/systemd/system/vpn-update-china-firm-bypass.service
+install -m 0644 "$SCRIPT_DIR/vpn-update-china-firm-bypass.timer" \
+    /etc/systemd/system/vpn-update-china-firm-bypass.timer
+
 # ── 5. Start / restart services ───────────────────────────────────────────────
+python3 "$INSTALL_DIR/update-china-firm-bypass.py"
+systemctl disable --now vpn-update-split-full.timer 2>/dev/null || true
 systemctl daemon-reload
-systemctl enable vpn-controller vpn-provision
+systemctl enable vpn-controller vpn-provision vpn-update-china-firm-bypass.timer
 systemctl restart vpn-controller vpn-provision
+systemctl restart vpn-update-china-firm-bypass.timer
 sleep 2
 
 log "=== Status ==="

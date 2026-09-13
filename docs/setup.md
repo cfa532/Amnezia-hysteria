@@ -383,18 +383,14 @@ AllowedIPs = 10.8.1.<N>/32
 ```
 Then reload: `awg syncconf awg0 <(awg-quick strip awg0)`
 
-#### Mobile split routing
+#### Client split routing
 
-iOS showed unreliable handshakes with the honest full split list
-(`~198 KB`, `11975` routes). A reduced split list under `128 KB` connects
-reliably. Taobao product detail pages were still blocked until Alibaba/Taobao
-cloud and CDN prefixes were excluded from `AllowedIPs`, forcing that traffic
-direct. The current mobile recommendation is:
-
-- iOS/Android: use the reduced Taobao-direct split list.
-- macOS: keep the honest full split list; macOS does not have the same config
-  size limit.
-- IPv6: keep disabled in client `AllowedIPs` for the current environment.
+Generated split profiles use a VPN-default policy. iOS/Android file imports cover
+major Chinese internet firms and are capped at 32 KiB. Their companion QR profile
+is capped at 2000 bytes and retains only WeChat, Taobao and Douyin coverage.
+macOS/Windows file imports use the exact full bypass dataset without a mobile
+size cap. Local/special IPv4 and active endpoint networks remain direct; every
+other public IPv4 destination uses AWG. IPv6 remains disabled in split mode.
 
 Follow-up testing on iOS showed that a tiny full-tunnel profile
 (`AllowedIPs = 0.0.0.0/1, 128.0.0.0/1` plus endpoint exclusion) can connect and
@@ -406,7 +402,7 @@ show that failure in the same test window: routes stayed `satisfied`, handshake
 succeeded, and traffic counters moved.
 
 Do not use the temporary `ios1-full-test*` profiles as production iOS configs.
-Production mobile configs should use the reduced split list, `MTU = 1180`, DNS
+Production mobile configs should use the firm-bypass split list, `MTU = 1180`, DNS
 IPv4 only, and `PersistentKeepalive = 10`.
 
 ### macOS (additional machines)

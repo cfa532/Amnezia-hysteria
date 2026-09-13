@@ -11,12 +11,12 @@ by this repo's setup). Captured here for posterity; see
   `/usr/local/sbin/gen8-update-split-cidrs`.
 - `gen8-update-split-cidrs.service` / `.timer` — weekly run (Sun 04:20).
 
-This is the **canonical full-list generator**. The controller runs the same
-algorithm (minus the wg-tahoe apply step) via
-[`../controller/update-split-full-list.py`](../controller/update-split-full-list.py)
-to keep tn1's macOS provisioning list
-(`/etc/vpn-controller/split-allowed-ips-full.txt`) on the identical APNIC-derived
-set. Both currently yield ~11985 non-China IPv4 routes.
+This APNIC complement remains specific to gen8's router policy. Client profiles
+use a different tiered strategy: the controller's
+[`update-china-firm-bypass.py`](../controller/update-china-firm-bypass.py)
+maintains major-firm and priority QR datasets. Mobile file imports are capped at
+32 KiB, QR profiles at 2000 bytes, and desktop file imports retain the full set;
+generated `AllowedIPs` sends all other public IPv4 through AWG.
 
 ## FEC layer (cross-strait packet-loss mitigation)
 

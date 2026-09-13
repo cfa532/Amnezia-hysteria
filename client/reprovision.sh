@@ -3,7 +3,7 @@
 #
 # Usage: reprovision.sh <device_name> [os_type] [routing] [output_dir]
 #   device_name: mac1, mac2, ios1, etc.
-#   os_type:     macos | ios | android  (default: macos)
+#   os_type:     macos | windows | ios | android  (default: macos)
 #   routing:     full | split            (default: split)
 #   output_dir:  where to write output files  (default: ~/Documents/Gen8)
 #
@@ -13,9 +13,11 @@
 #   ENDPOINT=preferred  pin config to the selected healthy server IP
 #   ENDPOINT=IP[:PORT]  pin config to an explicit endpoint
 #
-# macOS output: <device_name>.conf  (AWG config)
-#               servers.conf        (Hysteria2 server list — macOS only)
-# iOS/Android:  <device_name>.conf  (AWG config)
+# Desktop output: <device_name>.conf  (unrestricted AWG config)
+#                 servers.conf        (Hysteria2 server list — macOS only)
+# iOS/Android:    <device_name>.conf     (AWG config, maximum 32 KiB)
+#                 <device_name>-qr.conf  (priority QR config, maximum 2000 bytes)
+#                 <device_name>-qr.png   (when qrencode is installed)
 #
 # NOTE: Run on the controller server (tn1) where awg tools are installed.
 #
@@ -60,10 +62,40 @@ mkdir -p "$OUTPUT_DIR"
 echo "$RESPONSE" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-print(data['wg_config'])
+sys.stdout.write(data['wg_config'])
 " > "${OUTPUT_DIR}/${DEVICE_NAME}.conf"
 
-echo "Config written to ${OUTPUT_DIR}/${DEVICE_NAME}.conf"
+CONFIG_PATH="${OUTPUT_DIR}/${DEVICE_NAME}.conf"
+CONFIG_BYTES=$(wc -c < "$CONFIG_PATH" | tr -d ' ')
+if [[ "$OS_TYPE" == "ios" || "$OS_TYPE" == "android" ]] && (( CONFIG_BYTES > 32768 )); then
+    echo "ERROR: generated config is ${CONFIG_BYTES} bytes; 32768-byte limit exceeded" >&2
+    exit 1
+fi
+echo "Config written to $CONFIG_PATH (${CONFIG_BYTES} bytes)"
+
+if [[ "$OS_TYPE" == "ios" || "$OS_TYPE" == "android" ]]; then
+    QR_CONFIG_PATH="${OUTPUT_DIR}/${DEVICE_NAME}-qr.conf"
+    echo "$RESPONSE" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+sys.stdout.write(data['qr_config'])
+" > "$QR_CONFIG_PATH"
+
+    QR_CONFIG_BYTES=$(wc -c < "$QR_CONFIG_PATH" | tr -d ' ')
+    if (( QR_CONFIG_BYTES > 2000 )); then
+        echo "ERROR: generated QR config is ${QR_CONFIG_BYTES} bytes; 2000-byte limit exceeded" >&2
+        exit 1
+    fi
+    echo "Priority QR config written to $QR_CONFIG_PATH (${QR_CONFIG_BYTES} bytes)"
+
+    if command -v qrencode >/dev/null 2>&1; then
+        QR_IMAGE_PATH="${OUTPUT_DIR}/${DEVICE_NAME}-qr.png"
+        qrencode -l M -s 6 -o "$QR_IMAGE_PATH" < "$QR_CONFIG_PATH"
+        echo "QR image written to $QR_IMAGE_PATH"
+    else
+        echo "qrencode is not installed; scan or encode $QR_CONFIG_PATH separately"
+    fi
+fi
 
 if [[ "$OS_TYPE" == "macos" ]]; then
     echo "$RESPONSE" | python3 -c "

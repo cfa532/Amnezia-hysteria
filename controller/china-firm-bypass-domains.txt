@@ -1,0 +1,94 @@
+# Curated mainland services that should bypass the client VPN.
+# The updater resolves these through both AliDNS and DNSPod, then stores the
+# observed IPv4 edge networks as /24s. Keep this list focused: every entry adds
+# fragmentation to WireGuard AllowedIPs.
+
+# Baidu
+ditu.baidu.com
+api.map.baidu.com
+map.baidu.com
+fex.bdstatic.com
+maponline0.bdimg.com
+webmap0.bdimg.com
+
+# Alibaba / Taobao / Tmall / Alipay / Aliyun
+taobao.com
+www.taobao.com
+tmall.com
+alipay.com
+aliyun.com
+alicdn.com
+
+# Tencent / WeChat / QQ
+weixin.qq.com
+qq.com
+qcloud.com
+gtimg.com
+
+# ByteDance / Douyin / Toutiao
+douyin.com
+iesdouyin.com
+toutiao.com
+byteimg.com
+
+# JD
+jd.com
+360buyimg.com
+
+# Meituan / Dianping
+meituan.com
+meituan.net
+dianping.com
+
+# Pinduoduo
+pinduoduo.com
+yangkeduo.com
+
+# NetEase
+163.com
+126.net
+netease.com
+
+# Bilibili
+bilibili.com
+biliapi.com
+hdslb.com
+
+# Xiaohongshu
+xiaohongshu.com
+xhscdn.com
+
+# Kuaishou
+kuaishou.com
+ksyun.com
+
+# Weibo / Sina
+weibo.com
+sina.com.cn
+sinaimg.cn
+
+# Zhihu
+zhihu.com
+zhimg.com
+
+# Xiaomi
+mi.com
+xiaomi.com
+mi-img.com
+
+# Huawei
+huawei.com
+huaweicloud.com
+hicloud.com
+
+# Didi
+didiglobal.com
+xiaojukeji.com
+
+# Amap / Gaode
+amap.com
+gaode.com
+
+# Ctrip
+ctrip.com
+qunar.com

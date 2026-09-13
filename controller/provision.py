@@ -37,11 +37,25 @@ TOKEN_PATH   = Path("/etc/vpn-controller/api.token")
 HEALTH_STATE = Path("/var/run/vpn-health.json")
 
 HEALTH_STALE_SECS = 90   # refuse to provision if health data is older than this
-# Two split lists (see docs/regional-lb-design.md#split-allowedips):
-#   reduced "Taobao-direct" list for iOS/Android (< 128 KB, China-app-friendly)
-#   honest FULL non-China list for macOS (no config-size limit)
-SPLIT_IPS_PATH      = Path("/etc/vpn-controller/split-allowed-ips.txt")        # reduced (mobile)
-FULL_SPLIT_IPS_PATH = Path("/etc/vpn-controller/split-allowed-ips-full.txt")   # full (macOS)
+# Split routing is VPN-by-default. Only the curated Chinese-firm ranges in this
+# generated file, local/special IPv4, and active server endpoints bypass AWG.
+FIRM_BYPASS_CIDRS_PATH = Path("/etc/vpn-controller/china-firm-bypass-cidrs.txt")
+QR_BYPASS_CIDRS_PATH = Path("/etc/vpn-controller/china-qr-bypass-cidrs.txt")
+MOBILE_CONFIG_MAX_BYTES = 32 * 1024
+QR_CONFIG_TARGET_BYTES = 2000
+MOBILE_MIN_COMPACT_PREFIX = 16
+QR_MIN_COMPACT_PREFIX = 8
+
+ALWAYS_DIRECT_IPV4 = (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+    "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+    "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
+    "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+)
+QR_ALWAYS_DIRECT_IPV4 = (
+    "10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
+    "192.168.0.0/16", "224.0.0.0/4",
+)
 
 app = FastAPI(title="VPN Provisioning API")
 
@@ -222,50 +236,109 @@ AWG_OBF = (
     "H1 = 11223\nH2 = 44556\nH3 = 77889\nH4 = 99001"
 )
 
-def _split_allowed_ips() -> str:
-    """Reduced 'Taobao-direct' list for iOS/Android (kept < 128 KB)."""
-    if not SPLIT_IPS_PATH.exists():
-        raise HTTPException(status_code=500,
-                            detail="split-allowed-ips.txt not found on server")
-    return _normalize_allowed_ips(SPLIT_IPS_PATH.read_text())
+def _load_bypass_networks(path: Path) -> list[ipaddress.IPv4Network]:
+    if not path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"{path.name} not found; run the bypass updater",
+        )
+    normalized = _normalize_allowed_ips(path.read_text())
+    networks = []
+    for token in normalized.split(","):
+        network = ipaddress.ip_network(token.strip(), strict=True)
+        if network.version != 4:
+            raise HTTPException(status_code=500,
+                                detail="Chinese-firm bypass list must be IPv4-only")
+        networks.append(network)
+    return list(ipaddress.collapse_addresses(networks))
 
-def _full_split_allowed_ips() -> str:
-    """Honest full non-China list for macOS (no config-size limit)."""
-    if not FULL_SPLIT_IPS_PATH.exists():
-        raise HTTPException(status_code=500,
-                            detail="split-allowed-ips-full.txt not found on server")
-    return _normalize_allowed_ips(FULL_SPLIT_IPS_PATH.read_text())
 
-def _exclude_servers(allowed_csv: str, server_ips: list[str]) -> str:
-    """Carve each server's /24 out of a CIDR list, so a client that lands on that
-    server doesn't route the server's own IP into the not-yet-established tunnel.
-    Needed only for iOS/Android (no route-pinner). macOS doesn't call this."""
-    nets = []
-    for tok in allowed_csv.replace(",", " ").split():
-        tok = tok.strip()
-        if not tok:
-            continue
-        try:
-            nets.append(ipaddress.ip_network(tok))
-        except ValueError:
-            continue
+def _server_bypass_networks(server_ips: list[str], prefix: int = 24
+                            ) -> list[ipaddress.IPv4Network]:
+    """Keep active endpoint networks outside the tunnel to prevent loops."""
+    networks = []
     for ip_str in server_ips:
         try:
-            s24 = ipaddress.ip_network(f"{ip_str}/24", strict=False)
+            address = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
-        out = []
-        for n in nets:
-            if n.version != 4:
-                out.append(n); continue
-            if n.subnet_of(s24):          # entirely inside the server /24 → drop
-                continue
-            if s24.subnet_of(n):          # server /24 inside this block → split it out
-                out.extend(n.address_exclude(s24))
-            else:
-                out.append(n)             # disjoint → keep
-        nets = out
-    return ", ".join(str(n) for n in nets)
+        if address.version == 4:
+            networks.append(ipaddress.ip_network(f"{address}/{prefix}", strict=False))
+    return networks
+
+
+def _ipv4_complement(excluded: list[ipaddress.IPv4Network]) -> list[ipaddress.IPv4Network]:
+    """Return every public IPv4 destination not covered by excluded."""
+    collapsed = sorted(
+        ipaddress.collapse_addresses(excluded),
+        key=lambda network: int(network.network_address),
+    )
+    routes = []
+    cursor = 0
+    last = (1 << 32) - 1
+    for network in collapsed:
+        start = int(network.network_address)
+        end = int(network.broadcast_address)
+        if cursor < start:
+            routes.extend(ipaddress.summarize_address_range(
+                ipaddress.IPv4Address(cursor), ipaddress.IPv4Address(start - 1)))
+        cursor = max(cursor, end + 1)
+    if cursor <= last:
+        routes.extend(ipaddress.summarize_address_range(
+            ipaddress.IPv4Address(cursor), ipaddress.IPv4Address(last)))
+    return routes
+
+
+def _compact_bypass(networks: list[ipaddress.IPv4Network],
+                    target_prefix: int) -> list[ipaddress.IPv4Network]:
+    """Broaden narrow firm ranges when the exact complement is too large.
+
+    The updater emits DNS observations as /24s. Moving those toward the selected
+    profile's prefix floor reduces complement fragmentation. Existing ranges
+    broader than target_prefix are never changed.
+    """
+    compacted = []
+    for network in networks:
+        if network.prefixlen > target_prefix:
+            network = network.supernet(new_prefix=target_prefix)
+        compacted.append(network)
+    return list(ipaddress.collapse_addresses(compacted))
+
+
+def _bypass_allowed_ips(bypass_path: Path, server_ips: list[str],
+                        byte_budget: int | None,
+                        min_compact_prefix: int = MOBILE_MIN_COMPACT_PREFIX,
+                        separator: str = ", ",
+                        direct_networks: tuple[str, ...] = ALWAYS_DIRECT_IPV4,
+                        server_prefix: int = 24) -> str:
+    firm = _load_bypass_networks(bypass_path)
+    fixed = [ipaddress.ip_network(cidr) for cidr in direct_networks]
+    fixed.extend(_server_bypass_networks(server_ips, server_prefix))
+
+    if byte_budget is None:
+        return separator.join(
+            str(network) for network in _ipv4_complement(fixed + firm)
+        )
+
+    # Prefer exact firm ranges. If their complement is too fragmented, broaden
+    # dynamic observations one prefix at a time to the profile-specific floor.
+    widest_dynamic = max(
+        min_compact_prefix,
+        max((network.prefixlen for network in firm), default=min_compact_prefix),
+    )
+    for target_prefix in range(widest_dynamic, min_compact_prefix - 1, -1):
+        excluded = fixed + _compact_bypass(firm, target_prefix)
+        allowed = separator.join(
+            str(network) for network in _ipv4_complement(excluded)
+        )
+        if allowed and len(allowed.encode("utf-8")) <= byte_budget:
+            return allowed
+
+    raise HTTPException(
+        status_code=500,
+        detail=(f"{bypass_path.name} routes cannot fit the {byte_budget}-byte "
+                f"AllowedIPs budget without broadening beyond /{min_compact_prefix}"),
+    )
 
 def _normalize_allowed_ips(raw: str) -> str:
     tokens = []
@@ -296,14 +369,14 @@ def _normalize_allowed_ips(raw: str) -> str:
 
     if not networks:
         raise HTTPException(status_code=500,
-                            detail="split-allowed-ips.txt has no valid CIDR entries")
+                            detail="routing input has no valid CIDR entries")
     return ", ".join(networks)
 
 def _normalize_os_type(os_type: str) -> str:
     normalized = os_type.strip().lower()
-    if normalized not in {"macos", "ios", "android"}:
+    if normalized not in {"macos", "windows", "ios", "android"}:
         raise HTTPException(status_code=422,
-                            detail="os_type must be one of: macos, ios, android")
+                            detail="os_type must be one of: macos, windows, ios, android")
     return normalized
 
 def _normalize_routing(routing: str) -> str:
@@ -321,22 +394,11 @@ MOBILE_OS_TYPES = {"ios", "android"}
 def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
                    os_type: str, routing: str = "split",
                    server_ips: list[str] | None = None,
-                   endpoint: str = AWG_DIRECT_ENDPOINT) -> str:
+                   endpoint: str = AWG_DIRECT_ENDPOINT,
+                   qr_profile: bool = False) -> str:
     os_type = _normalize_os_type(os_type)
     routing = _normalize_routing(routing)
     server_ips = server_ips or []
-
-    if routing == "full":
-        # macOS uses a split-default route to dodge a macOS sendmsg bug with 0.0.0.0/0.
-        allowed = ("0.0.0.0/0, ::/0" if os_type in {"ios", "android"}
-                   else "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1")
-    elif os_type == "macos":
-        # Full honest non-China list. No server exclusion: awg-en1-route pins them.
-        allowed = _full_split_allowed_ips()
-    else:
-        # iOS/Android: reduced Taobao-direct list, with server /24s carved out
-        # (no route-pinner on mobile, so a covered server IP would loop).
-        allowed = _exclude_servers(_split_allowed_ips(), server_ips)
 
     if os_type in {"ios", "android"}:
         dns = "8.8.8.8"
@@ -347,19 +409,70 @@ def make_wg_config(privkey: str, client_ip: str, server_pubkey: str,
         mtu = "1280"
         keepalive = "25"
 
-    return (
-        f"[Interface]\n"
-        f"PrivateKey = {privkey}\n"
-        f"Address = {client_ip}/32\n"
-        f"DNS = {dns}\n"
-        f"MTU = {mtu}\n"
-        f"{AWG_OBF}\n\n"
-        f"[Peer]\n"
-        f"PublicKey = {server_pubkey}\n"
-        f"Endpoint = {endpoint}\n"
-        f"AllowedIPs = {allowed}\n"
-        f"PersistentKeepalive = {keepalive}\n"
-    )
+    def render(allowed_ips: str) -> str:
+        return (
+            f"[Interface]\n"
+            f"PrivateKey = {privkey}\n"
+            f"Address = {client_ip}/32\n"
+            f"DNS = {dns}\n"
+            f"MTU = {mtu}\n"
+            f"{AWG_OBF}\n\n"
+            f"[Peer]\n"
+            f"PublicKey = {server_pubkey}\n"
+            f"Endpoint = {endpoint}\n"
+            f"AllowedIPs = {allowed_ips}\n"
+            f"PersistentKeepalive = {keepalive}\n"
+        )
+
+    if routing == "full":
+        # macOS uses split defaults to avoid its 0.0.0.0/0 route-install bug.
+        allowed = ("0.0.0.0/0, ::/0" if os_type in {"ios", "android"}
+                   else "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1")
+    else:
+        endpoint_host = endpoint.rsplit(":", 1)[0].strip("[]")
+        bypass_ips = list(server_ips)
+        try:
+            if ipaddress.ip_address(endpoint_host).version == 4:
+                bypass_ips.append(endpoint_host)
+        except ValueError:
+            pass
+        fixed_bytes = len(render("").encode("utf-8"))
+        if qr_profile:
+            allowed = _bypass_allowed_ips(
+                QR_BYPASS_CIDRS_PATH,
+                bypass_ips,
+                QR_CONFIG_TARGET_BYTES - fixed_bytes,
+                min_compact_prefix=QR_MIN_COMPACT_PREFIX,
+                separator=",",
+                direct_networks=QR_ALWAYS_DIRECT_IPV4,
+                server_prefix=16,
+            )
+        elif os_type in MOBILE_OS_TYPES:
+            allowed = _bypass_allowed_ips(
+                FIRM_BYPASS_CIDRS_PATH,
+                bypass_ips,
+                MOBILE_CONFIG_MAX_BYTES - fixed_bytes,
+            )
+        else:
+            # Desktop imports are not constrained by mobile client or QR limits.
+            allowed = _bypass_allowed_ips(
+                FIRM_BYPASS_CIDRS_PATH,
+                bypass_ips,
+                None,
+            )
+
+    config = render(allowed)
+    config_bytes = len(config.encode("utf-8"))
+    max_bytes = (QR_CONFIG_TARGET_BYTES if qr_profile
+                 else MOBILE_CONFIG_MAX_BYTES if os_type in MOBILE_OS_TYPES
+                 else None)
+    if max_bytes is not None and config_bytes > max_bytes:
+        raise HTTPException(
+            status_code=500,
+            detail=(f"Generated client config is {config_bytes} bytes; "
+                    f"limit is {max_bytes} bytes"),
+        )
+    return config
 
 def _normalize_endpoint_policy(endpoint: str) -> str:
     normalized = (endpoint or "auto").strip()
@@ -404,9 +517,9 @@ class ProvisionRequest(BaseModel):
     device_name: str
     device_pubkey: str
     device_privkey: str    # generated client-side; never stored
-    os_type: str = "macos"    # "macos" | "ios" | "android"
+    os_type: str = "macos"    # "macos" | "windows" | "ios" | "android"
     region: str = "asia"
-    routing: str = "full"     # "full" (all traffic) | "split" (exclude CN IPs)
+    routing: str = "full"     # "full" | "split" (Chinese firms direct, rest VPN)
     endpoint: str = "auto"    # "auto" | "dns" | "preferred" | "host-or-ip[:port]"
 
 class ProvisionResponse(BaseModel):
@@ -417,6 +530,7 @@ class ProvisionResponse(BaseModel):
     endpoint: str
     wg_config: str
     servers_conf: str
+    qr_config: Optional[str] = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -434,18 +548,17 @@ def provision(req: ProvisionRequest,
     old_client = state["clients"].get(req.device_name)
     old_active = bool(old_client and old_client.get("active"))
 
-    # Revoke existing assignment — remove peer from every server
+    # Select as though this device's old assignment were inactive, but do not
+    # mutate real state until the replacement config has passed validation.
+    selection_state = {
+        "clients": {name: dict(client)
+                    for name, client in state["clients"].items()}
+    }
     if old_client:
-        if old_active:
-            for s in cfg["servers"]:
-                try:
-                    ssh_awg_remove(s, old_client["device_pubkey"])
-                except Exception as e:
-                    log.warning(f"Could not remove old peer from {s['name']}: {e}")
-        state["clients"][req.device_name]["active"] = False
+        selection_state["clients"][req.device_name]["active"] = False
 
     # Select preferred server — least loaded, healthy + available, in region
-    candidates = _available_in_region(req.region, cfg, health, state)
+    candidates = _available_in_region(req.region, cfg, health, selection_state)
     if not candidates:
         raise HTTPException(status_code=503,
                             detail=f"No servers available in region '{req.region}'")
@@ -455,6 +568,42 @@ def provision(req: ProvisionRequest,
 
     shared_pubkey = cfg["awg"]["shared_pubkey"]
     client_ip = old_client["client_ip"] if old_active else allocate_ip(cfg, state)
+    endpoint = _endpoint_for_request(endpoint_policy, preferred, os_type)
+
+    # Validate and size the complete client artifact before changing peers or
+    # persistent state. A stale/missing bypass set must fail without side effects.
+    wg_config = make_wg_config(
+        req.device_privkey,
+        client_ip,
+        shared_pubkey,
+        os_type,
+        routing,
+        server_ips=[s["ip"] for s in cfg["servers"]],
+        endpoint=endpoint,
+    )
+    qr_config = None
+    if os_type in MOBILE_OS_TYPES:
+        qr_config = make_wg_config(
+            req.device_privkey,
+            client_ip,
+            shared_pubkey,
+            os_type,
+            routing,
+            server_ips=[s["ip"] for s in cfg["servers"]],
+            endpoint=endpoint,
+            qr_profile=True,
+        )
+    servers_conf = make_servers_conf(cfg["servers"])
+
+    # Revoke an existing assignment only after its replacement is known-good.
+    if old_client:
+        if old_active:
+            for s in cfg["servers"]:
+                try:
+                    ssh_awg_remove(s, old_client["device_pubkey"])
+                except Exception as e:
+                    log.warning(f"Could not remove old peer from {s['name']}: {e}")
+        state["clients"][req.device_name]["active"] = False
 
     # Push peer to ALL servers so DNS failover and mobile migration can land on
     # any healthy backend without another server-side peer edit.
@@ -468,8 +617,6 @@ def provision(req: ProvisionRequest,
     if errors:
         log.warning(f"Peer push failed on: {errors} — failover to these servers"
                     f" will not work until resolved")
-
-    endpoint = _endpoint_for_request(endpoint_policy, preferred, os_type)
 
     # Persist
     state["clients"][req.device_name] = {
@@ -486,12 +633,6 @@ def provision(req: ProvisionRequest,
     }
     save_state(state)
 
-    wg_config    = make_wg_config(req.device_privkey, client_ip,
-                                   shared_pubkey, os_type, routing,
-                                   server_ips=[s["ip"] for s in cfg["servers"]],
-                                   endpoint=endpoint)
-    servers_conf = make_servers_conf(cfg["servers"])
-
     log.info(f"Provisioned {req.device_name} → preferred={preferred['name']}"
              f" ip={client_ip} region={req.region} endpoint={endpoint}")
 
@@ -502,6 +643,7 @@ def provision(req: ProvisionRequest,
         client_ip=client_ip,
         endpoint=endpoint,
         wg_config=wg_config,
+        qr_config=qr_config,
         servers_conf=servers_conf,
     )
 

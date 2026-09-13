@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily refresh of Chinese-firm AWG client bypass ranges
+
+[Timer]
+OnCalendar=*-*-* 03:40:00
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -12,7 +12,7 @@ This repository has three independent branches. Each represents a distinct archi
 |--------|-------------|
 | [`main`](../../tree/main) | **AmneziaWG + Hysteria2, manual setup.** Both protocols configured by hand. Client-side round-robin load balancing via a failover shell script. Server-side DNS failover via Cloudflare API. No provisioning server. Reference implementation — start here to understand the stack. |
 | [`regional-lb`](../../tree/regional-lb) | **AmneziaWG only, server-side load balancer.** Hysteria2 is absent. A FastAPI provisioning API assigns clients to the least-loaded server and manages DNS. Health checks via SSH. Use this if you want automated provisioning without the Hysteria2 transport layer. |
-| [`full-stack`](../../tree/full-stack) | **AmneziaWG + Hysteria2 + provisioning API + dynamic load balancer.** The complete production stack. Shared AWG keypair across all servers so failover is transparent — no reprovisioning needed when Hysteria2 switches servers. Split routing (Chinese IPs bypass VPN). Region-aware provisioning. **This branch.** |
+| [`full-stack`](../../tree/full-stack) | **AmneziaWG + Hysteria2 + provisioning API + dynamic load balancer.** The complete production stack. Shared AWG keypair across all servers so failover is transparent. Split routing is VPN-by-default with a compact Chinese-firm bypass. Region-aware provisioning. **This branch.** |
 
 ---
 
@@ -56,12 +56,15 @@ Public firewall/security-group policy:
 
 Client config policy:
 
-- iOS/Android use the reduced mobile split list, `DNS = 8.8.8.8`, `MTU = 1180`,
-  `PersistentKeepalive = 10`, and a controller-assigned sticky server endpoint.
-- macOS uses the honest full split list and the route-pinner, so server IPs do
-  not need to be carved out of the macOS `AllowedIPs`.
-- Mobile configs must keep every active server IP outside `AllowedIPs`; current
-  configs keep both `47.245.61.67` and `125.229.161.122` outside the tunnel.
+- Split configs are VPN-by-default. A compact, controller-refreshed set of major
+  Chinese internet-firm ranges bypasses AWG; all other public IPv4 uses AWG.
+- iOS/Android file-import configs are capped at 32 KiB. Their companion QR
+  profiles are capped at 2000 bytes and bypass only WeChat, Taobao and Douyin.
+- macOS/Windows file-import configs retain the exact full bypass dataset with no
+  mobile size cap. Mobile additionally uses `DNS = 8.8.8.8`, `MTU = 1180`,
+  `PersistentKeepalive = 10`, and a sticky endpoint.
+- Every active server endpoint `/24` stays outside `AllowedIPs` to prevent a
+  handshake routing loop. macOS retains the route-pinner as a second safeguard.
 
 Root-level client `.conf` files are operational artifacts and are intentionally
 ignored by git. Regenerate or copy them locally when provisioning clients; do

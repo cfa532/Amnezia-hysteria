@@ -87,16 +87,11 @@ curl -s https://api.ipify.org   # should return a VPN server IP, not your ISP IP
 
 ## Split routing
 
-Your `macN.conf` `AllowedIPs` is the **honest full** non-China CIDR list (~11975
-routes): Chinese IP ranges route direct via your ISP; everything else goes through
-the VPN. Server IPs do **not** need to be excluded — the route-pinner keeps the
-endpoint off the tunnel.
-
-> macOS uses the **full** list (no config-size limit). This is **not**
-> `/etc/vpn-controller/split-allowed-ips.txt` — that file is the *reduced
-> "Taobao-direct"* list for iOS/Android (kept < 128 KB and curated so major Chinese
-> apps route direct). Don't put the reduced list on a Mac; it shrinks coverage. See
-> [regional-lb-design.md](regional-lb-design.md#split-allowedips).
+Your macOS or Windows desktop config uses the exact, full controller bypass
+dataset without the 32 KiB mobile limit. Major Chinese internet-firm ranges
+route directly; every other public IPv4 destination routes through AWG. Active
+endpoint `/24`s are excluded. On macOS, the route-pinner provides a second
+safeguard against endpoint loops.
 
 If provisioned with `routing=full`, all traffic goes through the VPN — contact
 the admin to reprovision with `routing=split`.

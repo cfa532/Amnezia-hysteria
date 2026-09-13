@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh full and priority-QR Chinese-firm bypass ranges for AWG clients
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vpn-controller/update-china-firm-bypass.py
